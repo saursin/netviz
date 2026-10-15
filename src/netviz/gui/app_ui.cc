@@ -906,7 +906,7 @@ void AppUi::draw() {
     if (settings_.show_properties)
         design_.draw_properties(&settings_.show_properties);
     if (settings_.show_console)
-        console_.draw(&settings_.show_console, commands_);
+        console_.draw(&settings_.show_console, commands_, settings_.console_wrap);
 
     draw_about();
     preferences_.draw(settings_);

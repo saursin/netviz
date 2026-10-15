@@ -21,6 +21,7 @@ struct Settings {
     // Quick view toggles (menus)
     bool show_grid = true;
     bool show_perf_stats = false; // memory and UI time in the status bar
+    bool console_wrap = false;    // wrap long console lines (toggle in the console)
 
     // Panel visibility
     bool show_hierarchy = true;

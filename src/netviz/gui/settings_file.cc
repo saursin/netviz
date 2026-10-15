@@ -82,6 +82,8 @@ std::optional<std::string> parse_settings(std::string_view json, Settings& setti
         read(o, "show_grid", s.show_grid);
         read(o, "max_schematic_nodes", s.max_schematic_nodes, kMinNodes, kMaxNodes);
     }
+    if (section(root, "console", o))
+        read(o, "wrap", s.console_wrap);
     read(root, "show_perf_stats", s.show_perf_stats);
     settings = s;
     return std::nullopt;
@@ -111,6 +113,9 @@ std::string settings_to_json(const Settings& s) {
     out += std::format("    \"show_grid\": {},\n", s.show_grid);
     out += std::format("    \"max_schematic_nodes\": {}\n", s.max_schematic_nodes);
     out += "  },\n";
+    out += "  \"console\": {\n";
+    out += std::format("    \"wrap\": {}\n", s.console_wrap);
+    out += "  },\n";
     out += std::format("  \"show_perf_stats\": {}\n", s.show_perf_stats);
     out += "}\n";
     return out;
@@ -137,7 +142,8 @@ std::optional<std::string> write_settings_file(const std::filesystem::path& path
 bool same_file_settings(const Settings& a, const Settings& b) {
     return a.theme == b.theme && a.ui_scale == b.ui_scale && a.min_zoom == b.min_zoom &&
            a.max_zoom == b.max_zoom && a.max_schematic_nodes == b.max_schematic_nodes &&
-           a.show_grid == b.show_grid && a.show_perf_stats == b.show_perf_stats;
+           a.show_grid == b.show_grid && a.show_perf_stats == b.show_perf_stats &&
+           a.console_wrap == b.console_wrap;
 }
 
 bool read_legacy_ini(const std::filesystem::path& path, Settings& s,

@@ -18,6 +18,7 @@ Settings changed() {
     s.show_grid = false;
     s.max_schematic_nodes = 123456;
     s.show_perf_stats = true;
+    s.console_wrap = true;
     return s;
 }
 
