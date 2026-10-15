@@ -64,6 +64,7 @@ namespace netviz {
 class StringPool {
   public:
     NameId intern(std::string_view text);
+    std::optional<NameId> find(std::string_view text) const; // without adding it
     const std::string& str(NameId id) const;
     size_t size() const { return strings_.size(); }
 
@@ -159,8 +160,23 @@ struct NamedObject {
 struct Wire : NamedObject {
     int32_t port_index = -1;                  // position in Module::ports(), or -1 if not a port
     Direction direction = Direction::Unknown; // meaningful only when port_index >= 0
+    bool upto = false;                        // declared [lo:hi] (bits[0] is the highest index)
+    bool is_signed = false;                   // declared signed
+    int32_t start_offset = 0;                 // lowest declared bit index, e.g. 4 for a[7:4]
     uint32_t bits_begin = 0;
     uint32_t width = 0;
+};
+
+// Declared bit index of a wire's bit at `offset` (its position in bits()),
+// e.g. 4 for offset 0 of a[7:4], or 7 for offset 0 of a[4:7].
+int64_t bit_index(const Wire& wire, uint32_t offset);
+
+// Optional properties of a new wire.
+struct WireOptions {
+    bool hidden = false;
+    int32_t start_offset = 0;
+    bool upto = false;
+    bool is_signed = false;
 };
 
 struct Pin {
@@ -194,13 +210,19 @@ class Module {
 
     NameId name() const { return name_; }
 
+    // A blackbox module declares only its ports; its contents are unknown
+    // (e.g. a library cell). Its ports are not checked for drivers.
+    bool is_blackbox() const { return blackbox_; }
+    void set_blackbox(bool blackbox) { blackbox_ = blackbox; }
+
     // -- Building (structure is append-only) --------------------------------
 
     // Adds `count` new signal bits and returns the first one's id.
     SignalBitId add_signals(uint32_t count);
 
     // Returns nullopt if a wire with this name already exists.
-    std::optional<WireId> add_wire(NameId name, std::span<const SigBit> bits, bool hidden = false);
+    std::optional<WireId> add_wire(NameId name, std::span<const SigBit> bits,
+                                   const WireOptions& options = {});
 
     // Makes a wire a module port, appended to the port order.
     void make_port(WireId wire, Direction direction);
@@ -243,6 +265,7 @@ class Module {
     uint32_t append_bits(std::span<const SigBit> bits);
 
     NameId name_;
+    bool blackbox_ = false;
     uint32_t signal_count_ = 0;
     std::vector<NamedValue> attributes_;
     std::vector<NamedValue> parameters_;
@@ -293,5 +316,6 @@ class Design {
 // Writes a human-readable dump of the design. This is a debugging aid with a
 // deterministic layout, not a stable file format.
 void dump(const Design& design, std::ostream& out);
+void dump(const Design& design, ModuleId module, std::ostream& out);
 
 } // namespace netviz

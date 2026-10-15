@@ -19,6 +19,13 @@ NameId StringPool::intern(std::string_view text) {
     return id;
 }
 
+std::optional<NameId> StringPool::find(std::string_view text) const {
+    auto it = index_.find(text);
+    if (it == index_.end())
+        return std::nullopt;
+    return it->second;
+}
+
 const std::string& StringPool::str(NameId id) const {
     return strings_.at(id.index);
 }
@@ -58,6 +65,12 @@ const Value* NamedObject::attribute(NameId attr) const {
     return nullptr;
 }
 
+int64_t bit_index(const Wire& wire, uint32_t offset) {
+    assert(offset < wire.width);
+    uint32_t position = wire.upto ? wire.width - 1 - offset : offset;
+    return static_cast<int64_t>(wire.start_offset) + position;
+}
+
 // ---------------------------------------------------------------------------
 // Module
 // ---------------------------------------------------------------------------
@@ -78,14 +91,18 @@ uint32_t Module::append_bits(std::span<const SigBit> bits) {
     return begin;
 }
 
-std::optional<WireId> Module::add_wire(NameId name, std::span<const SigBit> bits, bool hidden) {
+std::optional<WireId> Module::add_wire(NameId name, std::span<const SigBit> bits,
+                                       const WireOptions& options) {
     if (wire_index_.contains(name))
         return std::nullopt;
 
     WireId id(static_cast<uint32_t>(wires_.size()));
     Wire wire;
     wire.name = name;
-    wire.hidden = hidden;
+    wire.hidden = options.hidden;
+    wire.start_offset = options.start_offset;
+    wire.upto = options.upto;
+    wire.is_signed = options.is_signed;
     wire.bits_begin = append_bits(bits);
     wire.width = static_cast<uint32_t>(bits.size());
     wires_.push_back(std::move(wire));
@@ -260,42 +277,52 @@ void dump_values(std::ostream& out, const StringPool& names, const char* label,
 } // namespace
 
 void dump(const Design& design, std::ostream& out) {
+    for (uint32_t m = 0; m < design.modules().size(); m++)
+        dump(design, ModuleId(m), out);
+}
+
+void dump(const Design& design, ModuleId id, std::ostream& out) {
     const StringPool& names = design.names();
     std::optional<ModuleId> top = design.top();
+    const Module& module = design.module(id);
+    out << "module " << names.str(module.name());
+    if (top && *top == id)
+        out << " (top)";
+    if (module.is_blackbox())
+        out << " (blackbox)";
+    out << "\n  signals " << module.signal_count() << '\n';
+    dump_values(out, names, "parameter", module.parameters(), "  ");
+    dump_values(out, names, "attribute", module.attributes(), "  ");
 
-    for (uint32_t m = 0; m < design.modules().size(); m++) {
-        const Module& module = design.modules()[m];
-        out << "module " << names.str(module.name());
-        if (top && top->index == m)
-            out << " (top)";
-        out << "\n  signals " << module.signal_count() << '\n';
-        dump_values(out, names, "parameter", module.parameters(), "  ");
-        dump_values(out, names, "attribute", module.attributes(), "  ");
+    for (const Wire& wire : module.wires()) {
+        out << "  wire " << names.str(wire.name) << " [" << wire.width << ']';
+        if (wire.start_offset != 0)
+            out << " offset " << wire.start_offset;
+        if (wire.upto)
+            out << " upto";
+        if (wire.is_signed)
+            out << " signed";
+        if (wire.port_index >= 0)
+            out << " port" << wire.port_index << ' ' << direction_name(wire.direction);
+        if (wire.hidden)
+            out << " hidden";
+        out << ':';
+        dump_bits(out, module.bits(wire));
+        out << '\n';
+        dump_values(out, names, "attribute", wire.attributes, "    ");
+    }
 
-        for (const Wire& wire : module.wires()) {
-            out << "  wire " << names.str(wire.name) << " [" << wire.width << ']';
-            if (wire.port_index >= 0)
-                out << " port" << wire.port_index << ' ' << direction_name(wire.direction);
-            if (wire.hidden)
-                out << " hidden";
-            out << ':';
-            dump_bits(out, module.bits(wire));
+    for (const Cell& cell : module.cells()) {
+        out << "  cell " << names.str(cell.name) << ' ' << names.str(cell.type);
+        if (cell.hidden)
+            out << " hidden";
+        out << '\n';
+        dump_values(out, names, "parameter", cell.parameters, "    ");
+        dump_values(out, names, "attribute", cell.attributes, "    ");
+        for (const Pin& pin : module.pins(cell)) {
+            out << "    " << names.str(pin.port) << ' ' << direction_name(pin.direction) << ':';
+            dump_bits(out, module.bits(pin));
             out << '\n';
-            dump_values(out, names, "attribute", wire.attributes, "    ");
-        }
-
-        for (const Cell& cell : module.cells()) {
-            out << "  cell " << names.str(cell.name) << ' ' << names.str(cell.type);
-            if (cell.hidden)
-                out << " hidden";
-            out << '\n';
-            dump_values(out, names, "parameter", cell.parameters, "    ");
-            dump_values(out, names, "attribute", cell.attributes, "    ");
-            for (const Pin& pin : module.pins(cell)) {
-                out << "    " << names.str(pin.port) << ' ' << direction_name(pin.direction) << ':';
-                dump_bits(out, module.bits(pin));
-                out << '\n';
-            }
         }
     }
 }

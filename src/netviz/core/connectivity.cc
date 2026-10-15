@@ -123,7 +123,7 @@ std::string describe_bit(const Design& design, const Module& module, const Conne
     const std::string& name = design.names().str(wire.name);
     if (wire.width == 1)
         return std::format("s{} ({})", bit.index, name);
-    return std::format("s{} ({}[{}])", bit.index, name, names[0].offset);
+    return std::format("s{} ({}[{}])", bit.index, name, bit_index(wire, names[0].offset));
 }
 
 // Adds one warning for a list of problem bits, naming up to kMaxExamples.
@@ -192,7 +192,10 @@ std::vector<Issue> validate(const Design& design) {
         }
 
         // Driver checks. A bit with an Unknown-direction endpoint might be
-        // driven by it, so it is not reported as undriven.
+        // driven by it, so it is not reported as undriven. A blackbox has no
+        // contents, so nothing inside it drives its outputs.
+        if (module.is_blackbox())
+            continue;
         Connectivity conn(module);
         std::vector<SignalBitId> multi_driven;
         std::vector<SignalBitId> undriven;

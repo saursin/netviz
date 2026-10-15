@@ -66,7 +66,7 @@ struct FullAdder {
             m.add_wire(n("s1"), std::span(&s1, 1));
             m.add_wire(n("c1"), std::span(&c1, 1));
             m.add_wire(n("c2"), std::span(&c2, 1));
-            m.add_wire(n("$abc$84$c1"), std::span(&c1, 1), /*hidden=*/true);
+            m.add_wire(n("$abc$84$c1"), std::span(&c1, 1), {.hidden = true});
 
             SigBit a = sig(0), b = sig(1), cin = sig(2), sum = sig(3), cout = sig(4);
             NewPin ha1[] = {{n("a"), Direction::Unknown, std::span(&a, 1)},
@@ -122,6 +122,9 @@ TEST_CASE("StringPool interns each string once") {
     CHECK(pool.intern("b") != a);
     CHECK(pool.str(a) == "a");
     CHECK(pool.size() == 2);
+    CHECK(pool.find("b").has_value());
+    CHECK_FALSE(pool.find("c").has_value());
+    CHECK(pool.size() == 2); // find() does not add
 }
 
 TEST_CASE("as_int reads MSB-first 0/1 bit strings only") {
@@ -365,7 +368,7 @@ TEST_CASE("dump writes a deterministic description") {
     m.make_port(a, Direction::Input);
     m.make_port(*m.add_wire(n("y"), std::span(&out, 1)), Direction::Output);
     SigBit bus[] = {out, zero};
-    m.add_wire(n("$tmp"), bus, /*hidden=*/true);
+    m.add_wire(n("$tmp"), bus, {.hidden = true});
 
     NewPin pins[] = {{n("A"), Direction::Input, std::span(&in, 1)},
                      {n("Y"), Direction::Output, std::span(&out, 1)}};
@@ -385,4 +388,44 @@ TEST_CASE("dump writes a deterministic description") {
                             "    parameter DRIVE = 10\n"
                             "    A input: s0\n"
                             "    Y output: s1\n");
+}
+
+TEST_CASE("bit_index follows offset and upto") {
+    Design design;
+    auto n = [&](const char* text) { return design.names().intern(text); };
+    Module& m = design.module(*design.add_module(n("top")));
+    m.add_signals(4);
+    SigBit bits[] = {sig(0), sig(1), sig(2), sig(3)};
+
+    // wire [7:4] down: bits[0] is index 4
+    const Wire& down = m.wire(*m.add_wire(n("down"), bits, {.start_offset = 4}));
+    CHECK(bit_index(down, 0) == 4);
+    CHECK(bit_index(down, 3) == 7);
+
+    // wire [4:7] up: bits[0] is the highest index, 7
+    const Wire& up = m.wire(*m.add_wire(n("up"), bits, {.start_offset = 4, .upto = true}));
+    CHECK(bit_index(up, 0) == 7);
+    CHECK(bit_index(up, 3) == 4);
+
+    m.add_wire(n("s"), std::span(bits, 2), {.start_offset = -1, .is_signed = true});
+    std::ostringstream out;
+    dump(design, out);
+    CHECK(out.str().find("wire down [4] offset 4: s0 s1 s2 s3") != std::string::npos);
+    CHECK(out.str().find("wire up [4] offset 4 upto: s0 s1 s2 s3") != std::string::npos);
+    CHECK(out.str().find("wire s [2] offset -1 signed: s0 s1") != std::string::npos);
+}
+
+TEST_CASE("validate does not check drivers inside blackbox modules") {
+    Design design;
+    auto n = [&](const char* text) { return design.names().intern(text); };
+    Module& m = design.module(*design.add_module(n("BUF")));
+    m.add_signals(2);
+    SigBit a = sig(0), y = sig(1);
+    m.make_port(*m.add_wire(n("A"), std::span(&a, 1)), Direction::Input);
+    m.make_port(*m.add_wire(n("Y"), std::span(&y, 1)), Direction::Output);
+
+    // As a normal module, its output Y is loaded but nothing drives it.
+    CHECK(has_issue(validate(design), Issue::Severity::Warning, "loaded but not driven"));
+    m.set_blackbox(true);
+    CHECK(validate(design).empty());
 }

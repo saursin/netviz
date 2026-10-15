@@ -54,8 +54,8 @@ struct Cell : NamedObject { ... };
 ```
 
 Code that only needs a name or attributes takes a `const NamedObject&` and works
-for both. The base adds no size: `Wire` is 48 bytes and `Cell` 72 bytes, with or
-without it.
+for both. The base adds no size: `Wire` (48 bytes at the time) and `Cell` (72
+bytes) were the same size with or without it.
 
 > **Why not a virtual hierarchy:** a benchmark of the same 1M-cell netlist
 > (3M pins, Release build) compared this IR with a classic `NetObject` design
@@ -129,8 +129,24 @@ the constants. `add_signals` asserts this limit.
 ## Wires, ports and aliases
 
 A `Wire` has a name, a width and an ordered list of `SigBit`s (bit 0 first). Its
-bits may include constants. Wires are added with `Module::add_wire(name, bits,
-hidden)`.
+bits may include constants. Wires are added with
+`Module::add_wire(name, bits, WireOptions{hidden, start_offset, upto, is_signed})`.
+
+A wire also records how its bits are numbered in the source, as in RTLIL:
+
+- `start_offset`: the lowest declared index, e.g. `4` for `a[7:4]`;
+- `upto`: declared `[lo:hi]` instead of `[hi:lo]`, so `bits()[0]` is the highest
+  index;
+- `is_signed`: declared `signed`.
+
+`bit_index(wire, offset)` gives the declared index of the bit at position
+`offset`: `start_offset + offset`, or `start_offset + width - 1 - offset` when
+`upto`.
+
+> **Why:** without these, bit names would be wrong for any bus that does not start
+> at 0 or counts upwards. Yosys writes them on most real netlists (e.g. after
+> splitting a bus, wire `a[1]` has `offset: 1`). They cost 8 bytes per wire
+> (`Wire` is 56 bytes).
 
 Two wires whose bits overlap are **aliases** of each other (e.g. Yosys's `c1` and
 `$abc$84$c1` both naming bit `s6`). No alias object exists; aliasing follows from
@@ -214,6 +230,17 @@ if a module with that name exists. `find_module(name)` looks modules up;
 `set_top`/`top` record the top module.
 
 Hierarchy is kept, not flattened: an instance is a cell whose type names a module.
+
+A module can be a **blackbox** (`is_blackbox()`, set with `set_blackbox()`): it
+declares only ports and has no contents, typically a library cell such as a
+`NAND` gate. Instances of blackboxes are leaf cells, not hierarchy; the UI lists
+them separately and they are never the top module.
+
+> **Why a first-class flag:** Yosys includes library cells as blackbox modules
+> (marked with a `blackbox` attribute). Checking an empty module for drivers
+> produces false warnings, and the hierarchy should not show every gate as a
+> submodule. A flag in the IR keeps the core independent of Yosys's attribute
+> names; the importer translates the attribute.
 
 > **Why hierarchical:** flattening duplicates every repeated submodule (bad for
 > large designs) and loses the module boundaries users navigate by. Flattening
@@ -315,7 +342,8 @@ Warnings:
 - signal bits with more than one driver, and loaded bits with no driver — one
   summary per module, naming up to 5 example bits (a bit that has an
   `Unknown`-direction endpoint is not reported as undriven, since that endpoint
-  may drive it);
+  may drive it). Blackbox modules are skipped: nothing inside them drives their
+  outputs;
 - module ports with `Unknown` direction (one per port);
 - cell pins with `Unknown` direction — one summary per cell type for the whole
   design.
