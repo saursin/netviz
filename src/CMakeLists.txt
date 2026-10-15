@@ -3,6 +3,7 @@
 #   netviz_core      std only: logging, commands, netlist IR + connectivity
 #   netviz_io        core + simdjson: file importers (Yosys JSON)
 #   netviz_view      core: camera, display graph, spatial grid
+#   netviz_layout    view: layout contract and the layered layout engine
 #   netviz_gui       view + io + SDL3 / OpenGL / ImGui: window, panels, app UI
 #
 # core and view must never include ImGui, SDL or OpenGL headers.
@@ -27,6 +28,11 @@ add_library(netviz_view
     netviz/view/spatial_grid.cc)
 target_link_libraries(netviz_view PUBLIC netviz_core)
 netviz_set_warnings(netviz_view)
+
+add_library(netviz_layout
+    netviz/layout/layered_layout.cc)
+target_link_libraries(netviz_layout PUBLIC netviz_view)
+netviz_set_warnings(netviz_layout)
 
 if(NETVIZ_BUILD_GUI)
     add_library(netviz_gui
