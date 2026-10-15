@@ -121,17 +121,24 @@ Described in [LAYOUT.md](LAYOUT.md).
   draws a background grid generated only for the visible area, calls back to
   draw the scene and overlay widgets, and reports clicks and keys
   (`CanvasEvents`) to its owner.
-- `SchematicView` shows the selected module: it builds the display graph and
-  layout on a `std::jthread` (stop requested when the module changes, the
-  design closes or the user cancels), installs the result on the UI thread,
-  and draws and picks it. Finished schematics are cached per module (every
-  instance of a module shares one) within a 256 MB budget, least recently
-  shown dropped first, so going back to a module is instant; the cache is
-  emptied when the design closes or reloads. `AppUi` likewise remembers the
-  pan and zoom of each module and restores them when going back to it. `AppUi` connects it to the selection: clicking a cell
-  or port selects it (Properties shows it), double-clicking an instance opens
-  its module, and breadcrumbs or Backspace go back up. The status bar shows the
-  layout stage with a cancel button.
+- **Schematics**: `SchematicService` builds the display graph and layout of
+  a module on a `std::jthread`, one job at a time in the order canvases ask,
+  and caches the results per module (every instance of a module shares one)
+  within a 256 MB budget, least recently used dropped first. A job nobody has
+  asked for in the last few frames (its canvas moved on or is hidden behind
+  another tab) is stopped, so hidden canvases cost nothing. The cache is
+  emptied when the design closes or reloads; the status bar shows the running
+  job with a cancel button.
+- **Canvases**: each `SchematicCanvas` is a dockable window showing one place
+  (a module reached through an instance path, or a module definition) with
+  its own camera and remembered pan/zoom per module. The last focused one is
+  active: the toolbar, status bar and Hierarchy/Modules clicks act on it.
+  Ctrl+click or middle-click (Hierarchy, Modules, an instance on a canvas),
+  context menus or Ctrl+T open another canvas, docked as a tab next to the
+  active one. The selection is global (Properties shows it); clicking a cell
+  or port selects it, double-clicking an instance opens its module,
+  breadcrumbs or Backspace go back up. The Hierarchy and Modules panes mark
+  what is shown in a canvas with an eye icon that brings it to the front.
 - *(planned)* Graph rendering: geometry is uploaded once into a few large GPU
   buffers (instanced quads for cells/pins, line segments for wires) whenever the
   graph or layout changes. Each frame draws them into an offscreen framebuffer

@@ -56,15 +56,19 @@ void draw_grid(ImDrawList* dl, const Camera2D& camera, const CanvasColors& color
 
 } // namespace
 
-CanvasEvents CanvasPanel::draw(Camera2D& camera, const CanvasOptions& options, float pinch_zoom,
-                               const SceneFn& scene, const OverlayFn& overlay) {
+CanvasEvents CanvasPanel::draw(const char* name, bool* open, Camera2D& camera,
+                               const CanvasOptions& options, float pinch_zoom, const SceneFn& scene,
+                               const OverlayFn& overlay) {
     hovered_ = false;
+    focused_ = false;
     CanvasEvents events;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    bool visible = ImGui::Begin(kWindowName, nullptr,
-                                ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    bool visible =
+        ImGui::Begin(name, open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar();
+    dock_id_ = ImGui::GetWindowDockID();
+    focused_ = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     if (!visible) {
         ImGui::End();
         return events;
@@ -119,6 +123,13 @@ CanvasEvents CanvasPanel::draw(Camera2D& camera, const CanvasOptions& options, f
 
     events.clicked = hovered_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
     events.double_clicked = hovered_ && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+    auto click = [&](ImGuiMouseButton button) { // released without dragging
+        float threshold = io.MouseDragThreshold;
+        return hovered_ && ImGui::IsMouseReleased(button) &&
+               io.MouseDragMaxDistanceSqr[button] < threshold * threshold;
+    };
+    events.middle_clicked = click(ImGuiMouseButton_Middle);
+    events.right_clicked = click(ImGuiMouseButton_Right);
     if (ImGui::IsWindowFocused()) {
         events.fit_requested = ImGui::IsKeyPressed(ImGuiKey_F, false);
         events.up_requested = ImGui::IsKeyPressed(ImGuiKey_Backspace, false);

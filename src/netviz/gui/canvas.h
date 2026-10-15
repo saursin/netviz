@@ -17,6 +17,8 @@ struct CanvasOptions {
 struct CanvasEvents {
     bool clicked = false;        // left button pressed on the canvas
     bool double_clicked = false; // (clicked is also set)
+    bool middle_clicked = false; // middle or right button released without dragging
+    bool right_clicked = false;  // (dragging with them pans)
     bool fit_requested = false;  // F
     bool up_requested = false;   // Backspace: leave the shown module
 };
@@ -29,8 +31,6 @@ struct CanvasEvents {
 // docs/ARCHITECTURE.md.
 class CanvasPanel {
   public:
-    static constexpr const char* kWindowName = "Canvas";
-
     // Draws into the canvas's draw list; `origin` is the canvas's top-left
     // corner in screen coordinates (camera screen coordinates are relative to it).
     using SceneFn = std::function<void(ImDrawList* dl, ImVec2 origin)>;
@@ -38,16 +38,22 @@ class CanvasPanel {
     // before the canvas does).
     using OverlayFn = std::function<void(ImVec2 origin)>;
 
-    // `pinch_zoom` is the touchpad pinch factor for this frame (1.0 = none).
-    CanvasEvents draw(Camera2D& camera, const CanvasOptions& options, float pinch_zoom,
-                      const SceneFn& scene, const OverlayFn& overlay);
+    // Draws the canvas window `name`, with a close button when `open` is not
+    // null. `pinch_zoom` is the touchpad pinch factor for this frame (1.0 = none).
+    CanvasEvents draw(const char* name, bool* open, Camera2D& camera, const CanvasOptions& options,
+                      float pinch_zoom, const SceneFn& scene, const OverlayFn& overlay);
 
     bool hovered() const { return hovered_; }
+    // Whether the window had keyboard focus this frame, and its dock node.
+    bool focused() const { return focused_; }
+    unsigned int dock_id() const { return dock_id_; }
     // Mouse position in world coordinates (valid while hovered).
     Vec2 mouse_world() const { return mouse_world_; }
 
   private:
     bool hovered_ = false;
+    bool focused_ = false;
+    unsigned int dock_id_ = 0;
     Vec2 mouse_world_;
 };
 

@@ -12,6 +12,7 @@ namespace {
 
 const LayoutOptions kLayoutOptions;
 constexpr size_t kCacheBytes = 256u << 20; // schematic cache budget
+constexpr uint64_t kWantedFrames = 3;      // frames a module stays wanted after being asked for
 constexpr float kGridCell = 256.0f;        // spatial grid cell size, world units
 constexpr float kMinTextPixels = 6.0f;     // smaller text is not drawn
 constexpr float kNameSize = 12.0f;         // node text height, world units
@@ -123,18 +124,17 @@ bool intersects(const Rect& a, const Rect& b) {
 
 } // namespace
 
-std::unique_ptr<SchematicView::Built> SchematicView::build(const Design& design, ModuleId module,
-                                                           const LayoutOptions& options,
-                                                           std::stop_token stop,
-                                                           LayoutProgress* progress) {
-    auto built = std::make_unique<Built>();
+std::unique_ptr<Schematic> SchematicService::build(const Design& design, ModuleId module,
+                                                   const LayoutOptions& options,
+                                                   std::stop_token stop, LayoutProgress* progress) {
+    auto built = std::make_unique<Schematic>();
     built->module = module;
     // A display node per cell and port: refuse before building anything.
     const Module& m = design.module(module);
     built->node_count = m.cells().size() + m.ports().size();
     if (built->node_count > options.max_nodes) {
         built->layout.status = LayoutResult::Status::TooLarge;
-        built->bytes = sizeof(Built);
+        built->bytes = sizeof(Schematic);
         return built;
     }
 
@@ -171,7 +171,7 @@ std::unique_ptr<SchematicView::Built> SchematicView::build(const Design& design,
 
     // Rough memory use, for the cache budget.
     size_t bytes =
-        sizeof(Built) + g.nodes().size_bytes() + g.pins().size_bytes() + g.nets().size_bytes();
+        sizeof(Schematic) + g.nodes().size_bytes() + g.pins().size_bytes() + g.nets().size_bytes();
     for (const DisplayNet& net : g.nets())
         bytes += (net.bit_count + net.driver_count + net.load_count) * sizeof(uint32_t);
     const LayoutResult& layout = built->layout;
@@ -187,132 +187,86 @@ std::unique_ptr<SchematicView::Built> SchematicView::build(const Design& design,
     return built;
 }
 
-void SchematicView::show(const Design& design, ModuleId module) {
-    if (module == module_ && state_ != State::Empty)
-        return;
-    stop_job();
-    module_ = module;
+bool SchematicService::wanted(ModuleId module) const {
+    auto it = asked_.find(module.index);
+    return it != asked_.end() && it->second + kWantedFrames >= frame_;
+}
+
+const Schematic* SchematicService::get(const Design& design, ModuleId module) {
+    design_ = &design;
+    asked_[module.index] = frame_;
     if (auto it = cache_.find(module.index); it != cache_.end()) {
-        install(it->second);
-        return;
+        it->second.last_used = frame_;
+        return it->second.schematic.get();
     }
-    built_ = nullptr;
-    node_count_ = 0;
-    state_ = State::Building;
+    if (cancelled_.contains(module.index) || running_ == module ||
+        std::find(queue_.begin(), queue_.end(), module) != queue_.end())
+        return nullptr;
+    if (running_)
+        queue_.push_back(module);
+    else
+        start(module);
+    return nullptr;
+}
+
+SchematicService::Status SchematicService::status(ModuleId module) const {
+    if (auto it = cache_.find(module.index); it != cache_.end())
+        return it->second.schematic->too_large() ? Status::TooLarge : Status::Ready;
+    if (cancelled_.contains(module.index))
+        return Status::Cancelled;
+    if (running_ == module)
+        return Status::Building;
+    if (std::find(queue_.begin(), queue_.end(), module) != queue_.end())
+        return Status::Queued;
+    return Status::None;
+}
+
+void SchematicService::start(ModuleId module) {
+    running_ = module;
     progress_.stage.store(LayoutStage::Ranking, std::memory_order_relaxed);
-    const Design* d = &design;
+    const Design* design = design_;
     LayoutOptions options = kLayoutOptions;
     options.max_nodes = max_nodes_;
-    worker_ = std::jthread([this, d, module, options](std::stop_token stop) {
-        std::unique_ptr<Built> built = build(*d, module, options, stop, &progress_);
+    worker_ = std::jthread([this, design, module, options](std::stop_token stop) {
+        std::unique_ptr<Schematic> built = build(*design, module, options, stop, &progress_);
         if (!built)
-            return; // cancelled
+            return; // stopped
         {
             std::lock_guard lock(mutex_);
             finished_ = std::move(built);
         }
-        Window::post_wake(); // the UI thread installs it on its next frame
+        Window::post_wake(); // the UI thread collects it on its next frame
     });
 }
 
-void SchematicView::set_max_nodes(size_t max_nodes) {
-    if (max_nodes == max_nodes_)
-        return;
-    max_nodes_ = max_nodes;
-    // Refusals were for the old limit; check those modules again when shown.
-    // (No job runs while a refusal is shown.)
-    if (state_ == State::TooLarge) {
-        built_ = nullptr;
-        state_ = State::Empty;
-        module_ = ModuleId();
-        node_count_ = 0;
-    }
-    for (auto it = cache_.begin(); it != cache_.end();) {
-        if (it->second.built->layout.status == LayoutResult::Status::TooLarge) {
-            cache_bytes_ -= it->second.built->bytes;
-            it = cache_.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-void SchematicView::stop_job() {
+void SchematicService::stop_job() {
     if (worker_.joinable()) {
         worker_.request_stop();
         worker_.join();
     }
-    std::unique_ptr<Built> done;
+    running_.reset();
+    std::unique_ptr<Schematic> done;
     {
         std::lock_guard lock(mutex_);
         done = std::move(finished_);
     }
-    if (done) { // finished just before the stop: keep it
-        add_to_cache(std::move(done));
-        evict();
-    }
+    if (done) // finished just before the stop: keep it
+        collect(std::move(done));
 }
 
-void SchematicView::reset_current() {
-    stop_job();
-    built_ = nullptr;
-    installed_ = false;
-    state_ = State::Empty;
-    module_ = ModuleId();
-    node_count_ = 0;
+void SchematicService::collect(std::unique_ptr<Schematic> schematic) {
+    CacheEntry& entry = cache_[schematic->module.index];
+    if (entry.schematic)
+        cache_bytes_ -= entry.schematic->bytes;
+    cache_bytes_ += schematic->bytes;
+    entry.schematic = std::move(schematic);
+    entry.last_used = frame_;
 }
 
-void SchematicView::clear() {
-    reset_current();
-    cache_.clear();
-    cache_bytes_ = 0;
-}
-
-void SchematicView::cancel() {
-    if (state_ != State::Building)
-        return;
-    stop_job();
-    state_ = State::Cancelled;
-}
-
-SchematicView::CacheEntry& SchematicView::add_to_cache(std::unique_ptr<Built> built) {
-    CacheEntry& entry = cache_[built->module.index];
-    if (entry.built)
-        cache_bytes_ -= entry.built->bytes;
-    cache_bytes_ += built->bytes;
-    entry.built = std::move(built);
-    entry.last_used = ++clock_;
-    return entry;
-}
-
-void SchematicView::install(CacheEntry& entry) {
-    entry.last_used = ++clock_;
-    built_ = entry.built.get();
-    module_ = built_->module;
-    node_count_ = built_->node_count;
-    bool too_large = built_->layout.status == LayoutResult::Status::TooLarge;
-    state_ = too_large ? State::TooLarge : State::Ready;
-    installed_ = !too_large;
-}
-
-// Drops the least recently shown schematics (never the shown one) until the
-// cache fits its budget.
-void SchematicView::evict() {
-    while (cache_bytes_ > kCacheBytes) {
-        auto oldest = cache_.end();
-        for (auto it = cache_.begin(); it != cache_.end(); ++it)
-            if (it->second.built.get() != built_ &&
-                (oldest == cache_.end() || it->second.last_used < oldest->second.last_used))
-                oldest = it;
-        if (oldest == cache_.end())
-            return;
-        cache_bytes_ -= oldest->second.built->bytes;
-        cache_.erase(oldest);
-    }
-}
-
-bool SchematicView::poll() {
-    std::unique_ptr<Built> done;
+bool SchematicService::poll() {
+    frame_++;
+    bool installed = false;
+    std::unique_ptr<Schematic> done;
     {
         std::lock_guard lock(mutex_);
         done = std::move(finished_);
@@ -320,28 +274,78 @@ bool SchematicView::poll() {
     if (done) {
         if (worker_.joinable())
             worker_.join(); // the job has finished; this returns at once
-        install(add_to_cache(std::move(done)));
-        evict();
+        running_.reset();
+        collect(std::move(done));
+        installed = true;
     }
-    bool installed = installed_;
-    installed_ = false;
+    if (running_ && !wanted(*running_))
+        stop_job();
+    std::erase_if(queue_, [&](ModuleId m) { return !wanted(m); });
+    if (!running_ && !queue_.empty()) {
+        ModuleId next = queue_.front();
+        queue_.pop_front();
+        start(next);
+    }
+    evict();
     return installed;
 }
 
-int64_t SchematicView::pick(Vec2 world) const {
-    if (state_ != State::Ready)
-        return -1;
-    return built_->grid.pick(world);
+void SchematicService::cancel() {
+    if (!running_)
+        return;
+    cancelled_.insert(running_->index);
+    stop_job();
 }
 
-void SchematicView::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin,
-                         const StringPool& names, bool light_theme, int64_t selected,
-                         int64_t hovered) const {
-    if (state_ != State::Ready)
+void SchematicService::retry(ModuleId module) {
+    cancelled_.erase(module.index);
+}
+
+void SchematicService::clear() {
+    stop_job();
+    queue_.clear();
+    asked_.clear();
+    cache_.clear();
+    cancelled_.clear();
+    cache_bytes_ = 0;
+    design_ = nullptr;
+}
+
+void SchematicService::set_max_nodes(size_t max_nodes) {
+    if (max_nodes == max_nodes_)
         return;
+    max_nodes_ = max_nodes;
+    // Refusals were for the old limit: check those modules again when asked.
+    for (auto it = cache_.begin(); it != cache_.end();) {
+        if (it->second.schematic->too_large()) {
+            cache_bytes_ -= it->second.schematic->bytes;
+            it = cache_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+// Drops the least recently used schematics, except those shown in the last
+// few frames, until the cache fits its budget.
+void SchematicService::evict() {
+    while (cache_bytes_ > kCacheBytes) {
+        auto oldest = cache_.end();
+        for (auto it = cache_.begin(); it != cache_.end(); ++it)
+            if (it->second.last_used + kWantedFrames < frame_ &&
+                (oldest == cache_.end() || it->second.last_used < oldest->second.last_used))
+                oldest = it;
+        if (oldest == cache_.end())
+            return;
+        cache_bytes_ -= oldest->second.schematic->bytes;
+        cache_.erase(oldest);
+    }
+}
+
+void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, const StringPool& names,
+                     bool light_theme, int64_t selected, int64_t hovered) const {
     const Colors& c = light_theme ? kLight : kDark;
-    const DisplayGraph& g = built_->graph;
-    const LayoutResult& layout = built_->layout;
+    const DisplayGraph& g = graph;
     float zoom = camera.zoom();
     Rect visible = camera.visible_world_rect();
     auto screen = [&](Vec2 w) {
@@ -359,8 +363,8 @@ void SchematicView::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin,
     for (int64_t node : {selected, hovered}) {
         if (node < 0)
             continue;
-        for (uint32_t k = built_->net_begin[node]; k < built_->net_begin[node + 1]; k++)
-            highlight[built_->node_nets[k]] = 1;
+        for (uint32_t k = net_begin[node]; k < net_begin[node + 1]; k++)
+            highlight[node_nets[k]] = 1;
     }
 
     // Wires (unhighlighted first, so highlighted ones are drawn on top).
@@ -398,12 +402,12 @@ void SchematicView::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin,
     float rounding = std::min(4.0f * zoom, 8.0f);
     float shadow = std::clamp(3.0f * zoom, 1.0f, 6.0f);
     float pad = 4.0f * zoom;
-    for (uint32_t v : built_->grid.query(visible)) {
+    for (uint32_t v : grid.query(visible)) {
         const DisplayNode& node = g.nodes()[v];
         const Rect& box = layout.nodes[v];
         ImVec2 a = screen(box.min);
         ImVec2 b = screen(box.max);
-        ImU32 accent = c.accent[built_->style[v]];
+        ImU32 accent = c.accent[style[v]];
         bool cell = node.kind == NodeKind::Cell || node.kind == NodeKind::Instance;
         bool marked = v == selected || v == hovered;
         ImU32 border = v == selected ? c.selected : v == hovered ? c.hovered : accent;

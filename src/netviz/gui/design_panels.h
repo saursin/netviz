@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace netviz {
@@ -43,6 +44,18 @@ class DesignPanels {
         }
     };
 
+    // A request from the Hierarchy or Modules pane to show a place in a canvas.
+    struct OpenRequest {
+        Selection place;
+        bool new_canvas = false;
+    };
+    // A place shown in a canvas (`window` is the canvas window's name).
+    struct OpenPlace {
+        std::vector<CellId> path;
+        ModuleId module;
+        std::string window;
+    };
+
     static constexpr const char* kHierarchyWindow = "Hierarchy";
     static constexpr const char* kModulesWindow = "Modules";
     static constexpr const char* kPropertiesWindow = "Properties";
@@ -58,6 +71,12 @@ class DesignPanels {
     // The module at the end of a path from the top.
     ModuleId module_at(const std::vector<CellId>& path) const;
 
+    // Clicking an item selects it and asks to show it in the active canvas;
+    // Ctrl+click, middle-click or its context menu ask for a new canvas.
+    std::vector<OpenRequest> take_open_requests() { return std::exchange(open_requests_, {}); }
+    // Places shown in canvases, marked in the panes; set before drawing them.
+    void set_open_places(std::vector<OpenPlace> places) { open_places_ = std::move(places); }
+
     void draw_hierarchy(bool* open);
     void draw_modules(bool* open);
     void draw_properties(bool* open);
@@ -68,6 +87,10 @@ class DesignPanels {
                             std::vector<CellId>& path);
     void draw_module_list();
     bool is_selected(ModuleId module, const std::vector<CellId>& path) const;
+    // Open requests from the item just drawn (`clicked`: its normal click).
+    void item_actions(const Selection& place, bool clicked);
+    // An eye icon after an item shown in a canvas; clicking it brings the canvas forward.
+    void draw_open_mark(const std::vector<CellId>& path, ModuleId module);
     std::string path_name(const std::vector<CellId>& path) const;
     void draw_module_properties(const Module& module, const std::vector<CellId>& path);
     void draw_cell_properties(const Module& module, CellId cell);
@@ -79,6 +102,8 @@ class DesignPanels {
     InstanceLists instances_;
     std::string file_;
     std::optional<Selection> selection_;
+    std::vector<OpenRequest> open_requests_;
+    std::vector<OpenPlace> open_places_;
     std::unique_ptr<Connectivity> connectivity_; // of connectivity_module_
     ModuleId connectivity_module_;
 };

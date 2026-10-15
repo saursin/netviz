@@ -1,5 +1,7 @@
 #include "netviz/gui/design_panels.h"
 
+#include "netviz/gui/fonts.h"
+
 #include <imgui.h>
 
 #include <format>
@@ -132,6 +134,50 @@ std::string DesignPanels::path_name(const std::vector<CellId>& path) const {
     return text;
 }
 
+void DesignPanels::item_actions(const Selection& place, bool clicked) {
+    bool middle = ImGui::IsItemClicked(ImGuiMouseButton_Middle);
+    std::optional<bool> new_canvas;
+    if (clicked || middle)
+        new_canvas = middle || ImGui::GetIO().KeyCtrl;
+    if (ImGui::BeginPopupContextItem()) {
+        if (ImGui::MenuItem("Open"))
+            new_canvas = false;
+        if (ImGui::MenuItem("Open in New Canvas", "Ctrl+Click"))
+            new_canvas = true;
+        ImGui::EndPopup();
+    }
+    if (new_canvas) {
+        selection_ = place;
+        open_requests_.push_back({place, *new_canvas});
+    }
+}
+
+void DesignPanels::draw_open_mark(const std::vector<CellId>& path, ModuleId module) {
+    const OpenPlace* shown = nullptr;
+    int count = 0;
+    for (const OpenPlace& p : open_places_)
+        if (p.module == module && p.path == path) {
+            shown = shown ? shown : &p;
+            count++;
+        }
+    if (!shown)
+        return;
+    ImGui::SameLine();
+    ImGui::PushID("shown");
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.0f, 0.0f));
+    if (ImGui::SmallButton(icons::kShown))
+        ImGui::SetWindowFocus(shown->window.c_str());
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(2);
+    if (count > 1)
+        ImGui::SetItemTooltip("Shown in %d canvases; click to bring one to the front", count);
+    else
+        ImGui::SetItemTooltip("Shown in a canvas; click to bring it to the front");
+    ImGui::PopID();
+}
+
 // -- Design (hierarchy) panel ------------------------------------------------
 
 void DesignPanels::draw_instance_tree(ModuleId module, const char* name, const char* type,
@@ -148,12 +194,13 @@ void DesignPanels::draw_instance_tree(ModuleId module, const char* name, const c
         flags |= ImGuiTreeNodeFlags_Selected;
 
     bool open = ImGui::TreeNodeEx(name, flags);
-    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
-        selection_ = Selection::place(path, module);
+    item_actions(Selection::place(path, module),
+                 ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen());
     if (type) {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", type);
     }
+    draw_open_mark(path, module);
     if (!open)
         return;
 
@@ -179,10 +226,11 @@ void DesignPanels::draw_module_list() {
     auto item = [&](uint32_t m) {
         const Module& module = modules[m];
         std::string label = std::format("{}##m{}", names.str(module.name()), m);
-        if (ImGui::Selectable(label.c_str(), is_selected(ModuleId(m), {})))
-            selection_ = Selection::place({}, ModuleId(m));
+        bool clicked = ImGui::Selectable(label.c_str(), is_selected(ModuleId(m), {}));
+        item_actions(Selection::place({}, ModuleId(m)), clicked);
         ImGui::SameLine();
         ImGui::TextDisabled("%zu cells", module.cells().size());
+        draw_open_mark({}, ModuleId(m));
     };
 
     size_t blackboxes = 0;
