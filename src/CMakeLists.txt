@@ -2,7 +2,7 @@
 #
 #   netviz_core      std only: logging, commands, netlist IR + connectivity
 #   netviz_io        core + simdjson: file importers (Yosys JSON)
-#   netviz_view      core: camera and, later, the visual graph + spatial index
+#   netviz_view      core: camera, display graph, spatial grid
 #   netviz_gui       view + io + SDL3 / OpenGL / ImGui: window, panels, app UI
 #
 # core and view must never include ImGui, SDL or OpenGL headers.
@@ -22,7 +22,9 @@ target_link_libraries(netviz_io PUBLIC netviz_core PRIVATE simdjson::simdjson)
 netviz_set_warnings(netviz_io)
 
 add_library(netviz_view
-    netviz/view/camera.cc)
+    netviz/view/camera.cc
+    netviz/view/display_graph.cc
+    netviz/view/spatial_grid.cc)
 target_link_libraries(netviz_view PUBLIC netviz_core)
 netviz_set_warnings(netviz_view)
 

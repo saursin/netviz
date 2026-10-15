@@ -2,6 +2,7 @@ add_executable(netviz_tests
     test_core.cc
     test_netlist.cc
     test_yosys_json.cc
+    test_display_graph.cc
     test_view.cc)
 target_link_libraries(netviz_tests PRIVATE netviz_view netviz_io doctest::doctest_with_main)
 netviz_set_warnings(netviz_tests)

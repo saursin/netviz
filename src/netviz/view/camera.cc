@@ -43,6 +43,16 @@ void Camera2D::zoom_at(Vec2 screen_anchor, float factor) {
     center_.y += before.y - after.y;
 }
 
+void Camera2D::fit(const Rect& area, float margin) {
+    center_ = Vec2{(area.min.x + area.max.x) * 0.5f, (area.min.y + area.max.y) * 0.5f};
+    float w = std::max(area.width(), 1.0f);
+    float h = std::max(area.height(), 1.0f);
+    if (viewport_.x <= 0.0f || viewport_.y <= 0.0f)
+        return;
+    float scale = 1.0f - 2.0f * margin;
+    set_zoom(std::min(viewport_.x * scale / w, viewport_.y * scale / h));
+}
+
 Rect Camera2D::visible_world_rect() const {
     return Rect{screen_to_world(Vec2{0.0f, 0.0f}), screen_to_world(viewport_)};
 }

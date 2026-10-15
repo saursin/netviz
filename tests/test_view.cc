@@ -73,3 +73,33 @@ TEST_CASE("visible rect covers the viewport") {
     CHECK(r.height() == doctest::Approx(600.0f / 2.5f));
     CHECK((r.min.x + r.max.x) * 0.5f == doctest::Approx(10.0f));
 }
+
+TEST_CASE("fit centres an area and zooms to show it") {
+    Camera2D cam;
+    cam.set_viewport_size(Vec2{1000.0f, 500.0f});
+    cam.fit(Rect{Vec2{0.0f, 0.0f}, Vec2{200.0f, 200.0f}}, 0.0f);
+    CHECK(cam.center().x == doctest::Approx(100.0f));
+    CHECK(cam.zoom() == doctest::Approx(2.5f)); // limited by the height: 500 / 200
+    Rect visible = cam.visible_world_rect();
+    CHECK(visible.min.y == doctest::Approx(0.0f));
+    CHECK(visible.max.y == doctest::Approx(200.0f));
+}
+
+#include "netviz/view/spatial_grid.h"
+
+TEST_CASE("spatial grid finds visible and picked rectangles") {
+    std::vector<Rect> rects = {
+        {{0, 0}, {10, 10}},       // 0
+        {{100, 0}, {110, 10}},    // 1
+        {{5, 5}, {20, 20}},       // 2, overlaps 0
+        {{500, 500}, {600, 520}}, // 3, spans several cells
+    };
+    SpatialGrid grid(rects, 32.0f);
+    CHECK(grid.query(Rect{{-5, -5}, {12, 12}}) == std::vector<uint32_t>{0, 2});
+    CHECK(grid.query(Rect{{90, -10}, {600, 600}}) == std::vector<uint32_t>{1, 3});
+    CHECK(grid.query(Rect{{1000, 1000}, {2000, 2000}}).empty());
+    CHECK(grid.pick(Vec2{7, 7}) == 2); // both 0 and 2 contain it; the later one wins
+    CHECK(grid.pick(Vec2{2, 2}) == 0);
+    CHECK(grid.pick(Vec2{550, 510}) == 3);
+    CHECK(grid.pick(Vec2{50, 50}) == -1);
+}

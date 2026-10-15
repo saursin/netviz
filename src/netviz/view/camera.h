@@ -55,6 +55,10 @@ class Camera2D {
     // Multiply zoom by `factor`, keeping the world point under `screen_anchor` fixed.
     void zoom_at(Vec2 screen_anchor, float factor);
 
+    // Centres `area` and zooms so it fills the viewport, leaving `margin`
+    // (a fraction, e.g. 0.05 = 5%) around it. The zoom stays within limits.
+    void fit(const Rect& area, float margin = 0.05f);
+
     // World-space rectangle currently visible; used for culling.
     Rect visible_world_rect() const;
 
