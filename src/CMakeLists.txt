@@ -1,6 +1,6 @@
 # Library layering (each library may only depend on the ones above it):
 #
-#   netviz_core      std only: logging, commands, (later) the netlist IR
+#   netviz_core      std only: logging, commands, netlist IR + connectivity
 #   netviz_view      core: camera and, later, the visual graph + spatial index
 #   netviz_gui       view + SDL3 / OpenGL / ImGui: window, panels, app UI
 #
@@ -8,7 +8,9 @@
 
 add_library(netviz_core
     netviz/core/command.cc
-    netviz/core/log.cc)
+    netviz/core/connectivity.cc
+    netviz/core/log.cc
+    netviz/core/netlist.cc)
 target_include_directories(netviz_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(netviz_core PUBLIC cxx_std_20)
 netviz_set_warnings(netviz_core)

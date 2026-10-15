@@ -25,7 +25,7 @@ Sections marked *(planned)* describe design intent, not existing code.
                             |
             +---------------v---------------+
             |  core                         |   logging, commands, netlist IR,
-            |                               |   frontends/backends  (std only)
+            |                               |   connectivity  (std only)
             +-------------------------------+
 ```
 
@@ -33,34 +33,32 @@ Each layer is a CMake library and may only depend on the layers below it. This
 is enforced by target links: `core` and `view` do not link ImGui/SDL/GL, so an
 accidental include fails to build.
 
+File importers (Yosys JSON, later Liberty/RTLIL) translate formats into the core
+IR and will live in their own library on top of `core`, so the core never depends
+on a parser or file format.
+
 ## Core
 
-Implemented today: logging with pluggable sinks
+Implemented today: the netlist IR (below), logging with pluggable sinks
 (`log.h`), and a `CommandRegistry` (`command.h`) that maps command names to
 handlers. Commands are the scripting/extension hook: the console runs them
 today, and other front ends (CLI, scripts) can reuse them.
 
-### Netlist IR *(planned)*
+### Netlist IR
 
-Modelled on Yosys RTLIL, adapted for viewing rather than synthesis:
+Specified in [IR.md](IR.md) (`netlist.h`, `connectivity.h`). In short:
 
-- `Design` → `Module` → `Wire`, `Cell`, ports. A port is a wire with a direction
-  and position, as in RTLIL.
-- Cells have a type (another module or a library cell), parameters, and
-  connections `port name → SigSpec`. A `SigSpec` is a list of bit slices of
-  wires or constants, so buses, slices and concatenations are represented exactly.
-- Names are interned (`IdString`-style string pool): comparisons and hashing are
-  integer operations, and repeated names cost nothing.
-- Objects live in per-module arrays and are referred to by typed ids
-  (`CellId`, `NetId`, …). Ids stay valid as containers grow, are
-  cheap to store in GPU-side tables, and make serialization and undo simple.
-  If deletion is needed, ids gain a generation counter so stale ids are detected.
-- Attributes (`src`, user tags, …) are stored in side tables, so objects stay small.
-- Derived connectivity (driver/loads per net bit) is built once after loading
-  and used to construct the visual graph.
-- Frontends (Yosys JSON, Liberty for cell pin directions, later Verilog via
-  Yosys) and backends (DOT, JSON, …) are plain functions over the public IR API,
-  registered by name so new formats do not touch existing code.
+- `Design` → `Module`s (hierarchical; a cell whose type is a module is an
+  instance). Names are interned in a `StringPool`.
+- Each module owns a space of signal bits; wires, ports and cell pins are named
+  views onto them (`SigBit` = signal bit or constant). Aliases are wires that
+  share bits.
+- Built once by an importer, then read: append-only, typed index ids, flat
+  arrays.
+- `Connectivity` is a derived per-bit index of drivers, loads and names, and
+  `validate()` reports design problems.
+- Importers (Yosys JSON next, later Liberty/RTLIL) live outside the core and
+  translate their formats into this IR.
 
 ## View *(partly implemented)*
 

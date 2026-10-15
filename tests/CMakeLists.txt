@@ -1,5 +1,6 @@
 add_executable(netviz_tests
     test_core.cc
+    test_netlist.cc
     test_view.cc)
 target_link_libraries(netviz_tests PRIVATE netviz_view doctest::doctest_with_main)
 netviz_set_warnings(netviz_tests)
