@@ -31,6 +31,24 @@ waveforms and timing, and scriptable.
 
 1. **Large modules (milestone 2b)**: level of detail by zoom, batched GPU
    drawing, and measuring and lifting the 50k-node layout guard.
+2. **Schematic usability**:
+   - **Multiple canvases**: each canvas a dockable window (tabs by default,
+     side by side when dragged) with its own place in the hierarchy and its
+     own pan/zoom; opened with middle-click or Ctrl+click on an instance or a
+     Hierarchy item, "Open in New Canvas" in context menus, or Ctrl+T. The
+     Hierarchy marks what is open in a canvas. Selection stays global; the
+     layout cache is shared.
+   - **Signal classes**: rules in Preferences (name, case-insensitive glob
+     patterns, color, pin marker, placement) with defaults for clocks
+     (`*clk*`, `*clock*`, and flip-flop clock pins by cell type) and resets
+     (`*rst*`, `*reset*`). Clock pins get the edge-triggered `>` marker.
+     Placement: routed normally, label only (a named stub instead of a wire;
+     hovering highlights every pin of the net), or on the top side of cells
+     (needs top pins in the layout).
+   - **Layout preferences**: choice of layout engine and its options (grid,
+     spacing, track pitch); the schematic cache key includes them.
+   - **Faster routing**: flat arrays instead of tree maps in track planning
+     (~280 of ~430 ms on a 49k-cell module).
 
 Follow-ups from import: lower peak memory while loading large files (simdjson's
 streaming "on demand" API instead of a whole-file document: a 333 MB netlist
