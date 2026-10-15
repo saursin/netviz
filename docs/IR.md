@@ -372,6 +372,11 @@ Importers translate an input format into this IR and are not part of the core.
 - A `NetId` layer grouping bits into named nets/buses.
 - An "any object" handle (kind + module + index) for selection and the
   properties panel.
+- Instance paths (occurrences): two instances of one module share a single
+  `Module` definition, so per-occurrence data (waveform values, timing paths,
+  selection) needs a path of instance cells from the top. This is a derived
+  concept; the stored IR does not change. See [ROADMAP.md](ROADMAP.md).
+- Structured locations in `Issue` (module and objects/bits), for clickable checks.
 - A Yosys cell library (pin directions and semantics of `$and`, `$dff`, `$mux`, …).
 - Liberty cell definitions.
 - Fan-in/fan-out traversal beyond the per-bit queries above.
