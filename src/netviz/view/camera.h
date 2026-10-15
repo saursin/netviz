@@ -25,8 +25,9 @@ struct Rect {
 // y pointing down. World coordinates use the same orientation.
 class Camera2D {
   public:
-    static constexpr float kMinZoom = 1e-4f;
-    static constexpr float kMaxZoom = 1e3f;
+    // Default zoom range: 1% to 3200%.
+    static constexpr float kDefaultMinZoom = 0.01f;
+    static constexpr float kDefaultMaxZoom = 32.0f;
 
     // World point shown at the center of the viewport.
     Vec2 center() const { return center_; }
@@ -34,8 +35,13 @@ class Camera2D {
     float zoom() const { return zoom_; }
 
     void set_center(Vec2 c) { center_ = c; }
-    void set_zoom(float z);
+    void set_zoom(float z); // clamped to the zoom limits
     void reset();
+
+    // Zoom range; the current zoom is clamped into it.
+    void set_zoom_limits(float min_zoom, float max_zoom);
+    float min_zoom() const { return min_zoom_; }
+    float max_zoom() const { return max_zoom_; }
 
     void set_viewport_size(Vec2 size) { viewport_ = size; }
     Vec2 viewport_size() const { return viewport_; }
@@ -55,6 +61,8 @@ class Camera2D {
   private:
     Vec2 center_;
     float zoom_ = 1.0f;
+    float min_zoom_ = kDefaultMinZoom;
+    float max_zoom_ = kDefaultMaxZoom;
     Vec2 viewport_;
 };
 

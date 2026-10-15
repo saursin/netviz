@@ -1,12 +1,24 @@
 # All third-party dependencies are declared here, pinned to exact commits.
 #
 # To build offline or against a local checkout, point CMake at the source:
+#   -DFETCHCONTENT_SOURCE_DIR_SIMDJSON=/path/to/simdjson
 #   -DFETCHCONTENT_SOURCE_DIR_IMGUI=/path/to/imgui
 #   -DFETCHCONTENT_SOURCE_DIR_SDL3=/path/to/SDL
 #   -DFETCHCONTENT_SOURCE_DIR_DOCTEST=/path/to/doctest
 # or set FETCHCONTENT_FULLY_DISCONNECTED=ON once sources are downloaded.
 
 include(FetchContent)
+
+# ---------------------------------------------------------------------------
+# Netlist import
+# ---------------------------------------------------------------------------
+# simdjson: fast, order-preserving JSON parser for Yosys netlists.
+FetchContent_Declare(simdjson
+    GIT_REPOSITORY https://github.com/simdjson/simdjson.git
+    GIT_TAG        f5de14f09256982933af2849beb43778bd421ca7 # v4.6.11
+    GIT_SHALLOW    FALSE
+    SYSTEM)
+FetchContent_MakeAvailable(simdjson)
 
 # ---------------------------------------------------------------------------
 # GUI dependencies

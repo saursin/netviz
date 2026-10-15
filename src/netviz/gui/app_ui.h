@@ -3,27 +3,18 @@
 #include "netviz/core/command.h"
 #include "netviz/gui/canvas.h"
 #include "netviz/gui/console.h"
+#include "netviz/gui/design_panels.h"
+#include "netviz/gui/preferences.h"
+#include "netviz/gui/settings.h"
+#include "netviz/gui/window.h"
+#include "netviz/io/yosys_json.h"
 #include "netviz/view/camera.h"
 
+#include <future>
+#include <memory>
 #include <string>
 
 namespace netviz {
-
-class Window;
-
-enum class Theme { Dark, Light };
-
-// User preferences and panel visibility. Saved to imgui.ini, restored on start.
-struct Settings {
-    Theme theme = Theme::Dark;
-    float ui_scale = 1.0f; // on top of the display's own scale
-    bool show_grid = true;
-    bool show_sidebar = true;
-    bool show_properties = true;
-    bool show_console = true;
-
-    bool operator==(const Settings&) const = default;
-};
 
 // Top-level UI: menu bar, toolbar, status bar, dock space and all panels.
 //
@@ -33,10 +24,17 @@ class AppUi {
   public:
     void init(Window& window);
     void draw();
+    // Waits for a file that is still loading. Call before the window closes.
+    void shutdown();
 
-    // Opens a netlist file. (Loading is not implemented yet; this records
-    // the file and reports it.)
+    // Opens a Yosys JSON netlist. If a design is already open, asks first
+    // whether to close it.
     void open_file(const std::string& path);
+    void close_design();
+    // Loads the last opened file again (e.g. after re-running Yosys).
+    void reload();
+    bool can_reload() const;
+    void cancel_loading();
 
     bool quit_requested() const { return quit_requested_; }
 
@@ -48,13 +46,19 @@ class AppUi {
     std::string write_settings() const;
     void register_commands();
 
+    void start_loading(const std::string& path);
+    void log_design_stats(const ImportTimings* timings);
+    void add_recent_file(const std::string& path);
+    void draw_recent_menu();
+    void poll_loading();
+    void draw_open_prompt();
+    void draw_load_progress();
     void handle_shortcuts();
+    void toggle_left_column();
     void draw_menu_bar();
     void draw_settings_menu();
     void draw_toolbar();
     void draw_status_bar();
-    void draw_sidebar();
-    void draw_properties();
     void draw_about();
     void build_default_layout(unsigned int dockspace_id);
 
@@ -65,14 +69,38 @@ class AppUi {
     CanvasPanel canvas_;
     ConsolePanel console_;
     CommandRegistry commands_;
+    DesignPanels design_;
 
+    // Result of a background load, handed to the UI thread when ready.
+    struct LoadedDesign {
+        ImportResult result;
+        InstanceLists instances;
+        double seconds = 0.0;
+    };
+    std::future<LoadedDesign> loading_;
+    std::string loading_path_;
+    std::shared_ptr<ImportProgress> load_progress_; // shared with the loading thread
+    std::string last_file_; // last file loaded or attempted; what reload() reads
+    std::string pending_open_;
+    std::vector<std::string> recent_files_; // newest first, absolute paths; saved in imgui.ini
+    uint64_t memory_before_load_ = 0; // process memory when the last load started // file waiting
+                                      // for "close the current design?"
+
+    PreferencesWindow preferences_;
     Settings settings_;
     Settings saved_settings_; // last state written to imgui.ini
     bool style_dirty_ = false;
+    Theme applied_theme_ = Theme::Dark; // style currently applied, see apply_style()
+    float applied_ui_scale_ = 1.0f;
 
-    std::string current_file_;
     bool show_about_ = false;
     bool show_imgui_demo_ = false;
+    bool show_imgui_metrics_ = false;
+
+    // Performance stats (Settings > Show Performance Stats).
+    double last_ui_ms_ = 0.0;    // time to build the previous frame's UI
+    Window::MemoryUsage memory_; // refreshed about once a second
+    double memory_refresh_at_ = 0.0;
     bool reset_layout_ = false;
     bool quit_requested_ = false;
 };

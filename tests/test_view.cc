@@ -45,9 +45,16 @@ TEST_CASE("zoom_at keeps the anchor point fixed") {
 TEST_CASE("zoom is clamped") {
     Camera2D cam;
     cam.set_zoom(1e9f);
-    CHECK(cam.zoom() == Camera2D::kMaxZoom);
+    CHECK(cam.zoom() == Camera2D::kDefaultMaxZoom);
     cam.set_zoom(0.0f);
-    CHECK(cam.zoom() == Camera2D::kMinZoom);
+    CHECK(cam.zoom() == Camera2D::kDefaultMinZoom);
+
+    // Narrower limits clamp the current zoom too.
+    cam.set_zoom(4.0f);
+    cam.set_zoom_limits(0.5f, 2.0f);
+    CHECK(cam.zoom() == 2.0f);
+    cam.zoom_at(Vec2{0.0f, 0.0f}, 100.0f);
+    CHECK(cam.zoom() == 2.0f);
 }
 
 TEST_CASE("panning moves the world opposite to the drag") {

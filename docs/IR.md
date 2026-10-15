@@ -381,14 +381,55 @@ Signal bits print as `s<N>`, constants as `0 1 x z`; `String` values are quoted,
 
 ## Importers
 
-Importers translate an input format into this IR and are not part of the core.
+Importers translate an input format into this IR. They live in the separate
+`netviz_io` library, so the core never depends on a parser.
 
-- **Yosys JSON** (next step): each module's integer bit numbers map to new
-  `SignalBitId`s; `netnames` become wires (aliases share bits); `ports` become
-  port wires; `cells` become cells with `port_directions` when present;
-  `hide_name` becomes `hidden`; parameters/attributes become `Value`s.
-- **RTLIL** (possible later): resolve `connect` statements and wire chunks into
-  shared signal bits at import time, producing the same IR.
+### Yosys JSON (`netviz/io/yosys_json.h`)
+
+`import_yosys_json(path)` reads `write_json` output with simdjson and returns an
+`ImportResult`: the design (or an error with context such as
+`module m: cell c: ...`) and a list of `Issue`s. Malformed structure fails the
+whole import; unknown keys are ignored.
+
+Per module, in file order:
+
+| Yosys JSON | IR |
+|---|---|
+| module `attributes`, `parameter_default_values` | module attributes and parameters |
+| `blackbox` attribute | `Module::set_blackbox(true)` |
+| integer bit numbers | new `SignalBitId`s, numbered in order of first appearance |
+| `"0"`, `"1"`, `"x"`, `"z"` bits | constant `SigBit`s |
+| `ports` (key order = port order) | wires made ports, with `offset`/`upto`/`signed` |
+| `netnames` | wires; a netname with a port's name is that port's wire (bits must match) |
+| `hide_name` | `hidden` |
+| `cells`: `type`, `parameters`, `attributes` | cells |
+| `connections` (in order) | pins |
+| `port_directions` | pin directions; pins without one stay `Unknown` |
+| non-empty `memories` | not imported yet; reported as a warning |
+
+Values follow Yosys's own JSON frontend: a string of only `0`/`1`/`x`/`z` is a
+bit vector; such a string followed by spaces is a string with one trailing space
+removed (Yosys adds it to mark strings that look like bits); numbers become
+32-bit (or 64-bit) bit vectors.
+
+Afterwards the top module is chosen as nextpnr does (a non-box module with the
+`top` attribute, otherwise the only non-box module no other module
+instantiates; otherwise none, with a warning), `resolve_pin_directions()` runs,
+and `validate()` issues are added to the result.
+
+> **Why our own importer:** Yosys's JSON frontend builds RTLIL with a
+> character-by-character parser (slow and memory-hungry on large files), and
+> nextpnr's flattens the hierarchy and uses a JSON library that loses key order
+> (which is the port order). Their rules are reused; their code is not.
+
+> **Why simdjson:** it parses hundreds of megabytes per second and keeps key
+> order. A 1M-cell netlist (333 MB) imports in about 2.4 s (Release); the parsed
+> document briefly needs about 4x the file size while the IR is built.
+
+### Others (possible later)
+
+- **RTLIL**: resolve `connect` statements and wire chunks into shared signal bits
+  at import time, producing the same IR.
 
 > **Why raw input ids never reach the core:** different importers can then feed
 > exactly the same representation, and the rest of netviz never depends on a file

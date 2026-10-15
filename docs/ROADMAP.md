@@ -20,15 +20,20 @@ waveforms and timing, and scriptable.
 - Application shell: docked UI, pannable/zoomable canvas, console with commands,
   persistent settings.
 - Netlist IR with connectivity index and validation ([IR.md](IR.md)).
+- Yosys JSON import (`netviz_io`, simdjson) with background loading, Design
+  (hierarchy) and Properties panels, `dump`/`check` console commands, and five
+  example designs in [ex/](../ex) with increasing hierarchy depth.
 
 ## Foundation milestones
 
-1. **Yosys JSON import**: parse `write_json` output into the IR; File → Open,
-   `open` command and the command line; Hierarchy panel shows the real module tree,
-   Properties shows the selected object.
-2. **Visual graph and schematic rendering**: derive nodes/pins/edges from a module
+1. **Visual graph and schematic rendering**: derive nodes/pins/edges from a module
    (or from a cone), a first left-to-right layout, culling and level of detail,
    then batched GPU drawing once large designs need it.
+
+Follow-ups from import: lower peak memory while loading large files (simdjson's
+streaming "on demand" API instead of a whole-file document: a 333 MB netlist
+currently peaks at ~1.9 GB while loading, ~550 MB after), and a cancel button for
+long loads.
 
 ## Tier 1: core differentiators
 

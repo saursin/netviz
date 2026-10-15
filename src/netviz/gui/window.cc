@@ -8,7 +8,21 @@
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl3.h>
 
+#include <algorithm>
 #include <string_view>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <psapi.h>
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#include <sys/resource.h>
+#else
+#include <cstdio>
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
 
 namespace netviz {
 
@@ -17,9 +31,6 @@ namespace {
 // Frames to keep rendering after the last event, so ImGui can settle
 // hover states and layout changes before the loop goes idle.
 constexpr int kActiveFrames = 3;
-
-// While idle, still wake up this often (ms) to pick up e.g. new log lines.
-constexpr int kIdleTimeoutMs = 500;
 
 } // namespace
 
@@ -143,7 +154,7 @@ bool Window::process_events() {
     bool idle = idle_frames_ >= kActiveFrames;
     bool minimized = (SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED) != 0;
     if (idle || minimized) {
-        if (SDL_WaitEventTimeout(&event, kIdleTimeoutMs)) {
+        if (SDL_WaitEventTimeout(&event, idle_timeout_ms_)) {
             handle_event(&event);
             got_event = true;
         }
@@ -188,10 +199,47 @@ void Window::on_file_dialog_result(void* userdata, const char* const* files, int
         std::lock_guard lock(self->opened_mutex_);
         self->opened_files_.push_back(files[0]);
     }
-    // Wake the main loop in case it is waiting for events.
+    post_wake(); // the main loop may be waiting for events
+}
+
+void Window::post_wake() {
     SDL_Event wake{};
     wake.type = SDL_EVENT_USER;
     SDL_PushEvent(&wake);
+}
+
+Window::MemoryUsage Window::memory_usage() {
+    MemoryUsage usage;
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS counters;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters))) {
+        usage.current = counters.WorkingSetSize;
+        usage.peak = counters.PeakWorkingSetSize;
+    }
+#elif defined(__APPLE__)
+    mach_task_basic_info info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info),
+                  &count) == KERN_SUCCESS)
+        usage.current = info.resident_size;
+    rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) == 0)
+        usage.peak = static_cast<uint64_t>(ru.ru_maxrss); // bytes on macOS
+#else
+    // /proc/self/statm: total and resident size, in pages.
+    if (std::FILE* f = std::fopen("/proc/self/statm", "r")) {
+        unsigned long long total = 0, resident = 0;
+        if (std::fscanf(f, "%llu %llu", &total, &resident) == 2)
+            usage.current = resident * static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
+        std::fclose(f);
+    }
+    rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) == 0)
+        usage.peak = static_cast<uint64_t>(ru.ru_maxrss) * 1024; // kilobytes on Linux
+#endif
+    // The two numbers come from different counters; keep them consistent.
+    usage.peak = std::max(usage.peak, usage.current);
+    return usage;
 }
 
 std::optional<std::string> Window::take_opened_file() {

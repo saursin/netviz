@@ -23,3 +23,9 @@ cmake --install build/release --prefix ~/.local   # optional: puts netviz on you
 netviz [file]                  # if installed
 ./build/release/netviz [file]  # straight from the build directory
 ```
+
+Netviz reads Yosys JSON netlists (`write_json`). Try the examples in [ex/](ex):
+
+```bash
+netviz ex/05_cpu/cpu.json
+```

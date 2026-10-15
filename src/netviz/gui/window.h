@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -58,6 +59,20 @@ class Window {
     // (1.0 if none). ImGui does not handle pinch, so it is collected here.
     float take_pinch_zoom();
 
+    // Wakes the event loop from any thread (e.g. when background work finishes).
+    static void post_wake();
+
+    // While idle, redraw at least this often (ms). Default 500; lower it while
+    // something changes without input, e.g. a progress bar.
+    void set_idle_timeout_ms(int ms) { idle_timeout_ms_ = ms; }
+
+    // Memory used by this process, in bytes (0 if the platform does not say).
+    struct MemoryUsage {
+        uint64_t current = 0; // resident set size
+        uint64_t peak = 0;    // highest resident set size so far
+    };
+    static MemoryUsage memory_usage();
+
   private:
     void handle_event(const void* sdl_event);
     static void on_file_dialog_result(void* userdata, const char* const* files, int filter);
@@ -68,6 +83,7 @@ class Window {
     bool quit_ = false;
     int idle_frames_ = 0;
     float display_scale_ = 1.0f;
+    int idle_timeout_ms_ = 500;
     float pinch_zoom_ = 1.0f;      // pinch factor accumulated since last take
     float pinch_last_ = 1.0f;      // last cumulative scale of the current gesture
     bool pinch_cumulative_ = true; // see handle_event()

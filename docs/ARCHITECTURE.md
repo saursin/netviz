@@ -23,9 +23,11 @@ Sections marked *(planned)* describe design intent, not existing code.
             |                               |   spatial index, LOD   (no UI deps)
             +---------------+---------------+
                             |
-            +---------------v---------------+
-            |  core                         |   logging, commands, netlist IR,
-            |                               |   connectivity  (std only)
+            +---------------v---------------+       +--------------------------+
+            |  core                         | <---- |  io   (simdjson)         |
+            |                               |       |  file importers:         |
+            |  logging, commands, netlist   |       |  Yosys JSON              |
+            |  IR, connectivity (std only)  |       +--------------------------+
             +-------------------------------+
 ```
 
@@ -33,9 +35,9 @@ Each layer is a CMake library and may only depend on the layers below it. This
 is enforced by target links: `core` and `view` do not link ImGui/SDL/GL, so an
 accidental include fails to build.
 
-File importers (Yosys JSON, later Liberty/RTLIL) translate formats into the core
-IR and will live in their own library on top of `core`, so the core never depends
-on a parser or file format.
+File importers (Yosys JSON today, later Liberty/RTLIL) translate formats into the
+core IR. They live in `netviz_io` on top of `core`, so the core never depends on a
+parser or file format; `gui` uses `io` to load files.
 
 ## Core
 
@@ -85,6 +87,25 @@ Specified in [IR.md](IR.md) (`netlist.h`, `connectivity.h`). In short:
   the user's `Settings`. Settings are stored in `imgui.ini` through an ImGui
   settings handler, next to the window layout. Panels are plain classes or
   methods with a `draw()`.
+- **Loading** runs in the background: `AppUi::open_file` imports the file with
+  `std::async`, the worker wakes the event loop (`Window::post_wake`) when done,
+  and the UI thread installs the design on its next frame. The UI never sees a
+  half-built design, and the window keeps responding while large files load.
+  The importer publishes its stage and fraction in an `ImportProgress` (two
+  atomics, updated every 1024 items, no measurable cost); the status bar shows
+  them, redrawing 10 times a second while a load runs. Setting
+  `ImportProgress::cancel` stops the import at its next progress check
+  (milliseconds; the initial file parse itself cannot be interrupted). The
+  status bar's cancel button and closing the window both use it, so quitting
+  never waits for a large load to finish.
+- Opening a file while a design is open asks first, then frees the current
+  design *before* loading the new one, so two large designs are never in memory
+  at once.
+- `DesignPanels` owns the loaded design and the selection, and draws three
+  panes: Hierarchy (instance tree from the top module), Modules (all module
+  definitions, with blackboxes such as library gates listed separately) and
+  Properties (path, module, ports with bit ranges, counts, parameters and
+  attributes).
 - `ConsolePanel` is a log sink with a bounded buffer, drawn with
   `ImGuiListClipper` so only visible lines are submitted, plus a command input
   line that runs `CommandRegistry` commands.

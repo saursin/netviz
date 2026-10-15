@@ -96,5 +96,6 @@ int main(int argc, char** argv) {
         ui.draw();
         window.end_frame();
     }
+    ui.shutdown();
     return 0;
 }

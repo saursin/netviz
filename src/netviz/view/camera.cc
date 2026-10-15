@@ -5,7 +5,13 @@
 namespace netviz {
 
 void Camera2D::set_zoom(float z) {
-    zoom_ = std::clamp(z, kMinZoom, kMaxZoom);
+    zoom_ = std::clamp(z, min_zoom_, max_zoom_);
+}
+
+void Camera2D::set_zoom_limits(float min_zoom, float max_zoom) {
+    min_zoom_ = min_zoom;
+    max_zoom_ = std::max(min_zoom, max_zoom);
+    set_zoom(zoom_);
 }
 
 void Camera2D::reset() {
