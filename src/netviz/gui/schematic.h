@@ -27,15 +27,29 @@ struct Schematic {
     SpatialGrid grid;
     std::vector<uint32_t> net_begin; // nets of node v: node_nets[net_begin[v] .. net_begin[v+1])
     std::vector<uint32_t> node_nets;
-    std::vector<uint8_t> style; // per node: its NodeStyle (colors), see schematic.cc
+    std::vector<uint8_t> style;        // per node: its NodeStyle (colors), see schematic.cc
+    SpatialGrid wire_grid;             // over the bounding boxes of all wire segments
+    std::vector<uint32_t> segment_net; // per segment in wire_grid: its display net
+    std::vector<uint32_t> net_of_bit;  // per signal bit of the module: display net, or kNoNet
+    static constexpr uint32_t kNoNet = UINT32_MAX;
 
     bool too_large() const { return layout.status == LayoutResult::Status::TooLarge; }
     // Display node under a world-space point, or -1.
     int64_t pick(Vec2 world) const { return too_large() ? -1 : grid.pick(world); }
-    // Draws the visible part. `selected` and `hovered` are display node
-    // indices (or -1); their nets are highlighted.
+    // Display net with a wire within `tolerance` (world units) of a point, or -1.
+    int64_t pick_net(Vec2 world, float tolerance) const;
+    // The display net carrying a signal bit, or -1.
+    int64_t net_of(SigBit bit) const;
+
+    // What is selected or under the cursor: display node and net indices, -1
+    // for none. Those nets, and the nets of those nodes, are highlighted.
+    struct Marks {
+        int64_t selected_node = -1, hovered_node = -1;
+        int64_t selected_net = -1, hovered_net = -1;
+    };
+    // Draws the visible part.
     void draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, const StringPool& names,
-              bool light_theme, int64_t selected, int64_t hovered) const;
+              bool light_theme, const Marks& marks) const;
 };
 
 // Builds schematics in the background and caches them, for all canvases.

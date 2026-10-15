@@ -160,6 +160,20 @@ std::unique_ptr<Schematic> SchematicService::build(const Design& design, ModuleI
                     nets.push_back(n);
             }
     }
+    // Wire picking: a grid over segment boxes, and each bit's display net.
+    std::vector<Rect> boxes;
+    for (uint32_t n = 0; n < built->layout.nets.size(); n++)
+        for (const Segment& seg : built->layout.nets[n].segments) {
+            boxes.push_back(Rect{Vec2{std::min(seg.a.x, seg.b.x), std::min(seg.a.y, seg.b.y)},
+                                 Vec2{std::max(seg.a.x, seg.b.x), std::max(seg.a.y, seg.b.y)}});
+            built->segment_net.push_back(n);
+        }
+    built->wire_grid = SpatialGrid(boxes, kGridCell);
+    built->net_of_bit.assign(m.signal_count(), Schematic::kNoNet);
+    for (uint32_t n = 0; n < g.nets().size(); n++)
+        for (SignalBitId bit : g.bits(g.nets()[n]))
+            built->net_of_bit[bit.index] = n;
+
     built->style.reserve(g.nodes().size());
     for (const DisplayNode& node : g.nodes())
         built->style.push_back(node_style(node, design.names()));
@@ -183,6 +197,8 @@ std::unique_ptr<Schematic> SchematicService::build(const Design& design, ModuleI
     bytes += (built->node_nets.size() + built->net_begin.size()) * sizeof(uint32_t) * 2 +
              built->style.size();
     bytes += g.nodes().size() * sizeof(uint32_t) * 2; // spatial grid entries (about)
+    bytes += boxes.size() * (sizeof(Rect) + 3 * sizeof(uint32_t)) +
+             built->net_of_bit.size() * sizeof(uint32_t); // wire picking
     built->bytes = bytes;
     return built;
 }
@@ -352,8 +368,37 @@ void SchematicService::evict() {
     }
 }
 
+int64_t Schematic::pick_net(Vec2 p, float tolerance) const {
+    if (too_large())
+        return -1;
+    Rect area{Vec2{p.x - tolerance, p.y - tolerance}, Vec2{p.x + tolerance, p.y + tolerance}};
+    int64_t best = -1;
+    float best_distance = tolerance;
+    for (uint32_t i : wire_grid.query(area)) {
+        // Segments are axis-aligned, so this is the distance to the segment.
+        const Rect& box = wire_grid.rect(i);
+        float dx = std::max({box.min.x - p.x, 0.0f, p.x - box.max.x});
+        float dy = std::max({box.min.y - p.y, 0.0f, p.y - box.max.y});
+        float distance = std::max(dx, dy);
+        if (distance <= best_distance) {
+            best_distance = distance;
+            best = segment_net[i];
+        }
+    }
+    return best;
+}
+
+int64_t Schematic::net_of(SigBit bit) const {
+    if (bit.is_constant() || bit.signal().index >= net_of_bit.size())
+        return -1;
+    uint32_t net = net_of_bit[bit.signal().index];
+    return net == kNoNet ? -1 : net;
+}
+
 void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, const StringPool& names,
-                     bool light_theme, int64_t selected, int64_t hovered) const {
+                     bool light_theme, const Marks& marks) const {
+    int64_t selected = marks.selected_node;
+    int64_t hovered = marks.hovered_node;
     const Colors& c = light_theme ? kLight : kDark;
     const DisplayGraph& g = graph;
     float zoom = camera.zoom();
@@ -376,6 +421,9 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
         for (uint32_t k = net_begin[node]; k < net_begin[node + 1]; k++)
             highlight[node_nets[k]] = 1;
     }
+    for (int64_t net : {marks.selected_net, marks.hovered_net})
+        if (net >= 0)
+            highlight[net] = 1;
 
     // Wires (unhighlighted first, so highlighted ones are drawn on top).
     for (int pass = 0; pass < 2; pass++) {

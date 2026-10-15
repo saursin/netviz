@@ -60,10 +60,12 @@ class SchematicCanvas {
     };
 
     const Schematic* schematic(Context& ctx);
-    int64_t selected_node(const Context& ctx, const Schematic& s) const;
+    // What to highlight: the selected cell, port or net if it is in this
+    // canvas's place, and what is under the cursor.
+    Schematic::Marks marks(const Context& ctx, const Schematic& s) const;
     void draw_scene(Context& ctx, ImDrawList* dl, ImVec2 origin);
     void draw_overlay(Context& ctx, ImVec2 origin);
-    void draw_tooltip(const Context& ctx) const;
+    void draw_tooltip(Context& ctx) const;
     void handle_events(Context& ctx, const CanvasEvents& events, Requests& requests);
     bool is_definition(const Design& design) const;
 
@@ -75,6 +77,7 @@ class SchematicCanvas {
     const Schematic* shown_ = nullptr;    // drawn last frame (to notice new ones)
     ModuleId shown_module_;
     int64_t hovered_node_ = -1;
+    int64_t hovered_net_ = -1; // when no node is under the cursor
     std::optional<unsigned int> dock_at_;
     Place menu_place_; // the instance whose context menu is open
 };

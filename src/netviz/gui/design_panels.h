@@ -25,13 +25,14 @@ class DesignPanels {
     // from the Modules list) and optionally one cell or port inside it. The
     // path matters: the same cell in two instances is two selections.
     struct Selection {
-        enum class Kind : uint8_t { None, Cell, Port };
+        enum class Kind : uint8_t { None, Cell, Port, Net };
 
         std::vector<CellId> path;
         ModuleId module;
         Kind kind = Kind::None;
         CellId cell;
         WireId port;
+        std::vector<SigBit> bits; // for Net: its signal bits (as drawn: one wire)
 
         bool operator==(const Selection&) const = default;
 
@@ -77,6 +78,10 @@ class DesignPanels {
     // Places shown in canvases, marked in the panes; set before drawing them.
     void set_open_places(std::vector<OpenPlace> places) { open_places_ = std::move(places); }
 
+    // Wire names for a list of bits of a module, e.g. "sum[3:0]" (connectivity
+    // is cached per module).
+    std::string describe_bits(ModuleId module, std::span<const SigBit> bits);
+
     void draw_hierarchy(bool* open);
     void draw_modules(bool* open);
     void draw_properties(bool* open);
@@ -95,8 +100,8 @@ class DesignPanels {
     void draw_module_properties(const Module& module, const std::vector<CellId>& path);
     void draw_cell_properties(const Module& module, CellId cell);
     void draw_port_properties(const Module& module, WireId port);
-    // Wire names for a list of bits, e.g. "sum[3:0]" (connectivity is cached per module).
-    std::string describe_bits(const Module& module, ModuleId id, std::span<const SigBit> bits);
+    void draw_net_properties(const Module& module, std::span<const SigBit> bits);
+    const Connectivity& connectivity(const Module& module, ModuleId id);
 
     std::unique_ptr<Design> design_;
     InstanceLists instances_;

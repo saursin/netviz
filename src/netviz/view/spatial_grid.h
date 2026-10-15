@@ -23,6 +23,8 @@ class SpatialGrid {
     // The rectangle containing `point` (the highest index if several), or -1.
     int64_t pick(Vec2 point) const;
 
+    const Rect& rect(uint32_t index) const { return rects_[index]; }
+
   private:
     void cell_range(const Rect& r, int& x0, int& y0, int& x1, int& y1) const;
 

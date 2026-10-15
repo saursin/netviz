@@ -7,6 +7,19 @@
 
 namespace netviz {
 
+namespace {
+
+constexpr float kNetPickPixels = 5.0f; // how close (on screen) a click must be to a wire
+
+std::vector<SigBit> net_bits(const DisplayGraph& graph, const DisplayNet& net) {
+    std::vector<SigBit> bits;
+    for (SignalBitId bit : graph.bits(net))
+        bits.push_back(SigBit::signal(bit));
+    return bits;
+}
+
+} // namespace
+
 std::string SchematicCanvas::window_id(int id) {
     return std::format("###canvas{}", id);
 }
@@ -104,31 +117,43 @@ SchematicCanvas::Requests SchematicCanvas::draw(Context& ctx, bool* open) {
     return requests;
 }
 
-int64_t SchematicCanvas::selected_node(const Context& ctx, const Schematic& s) const {
+Schematic::Marks SchematicCanvas::marks(const Context& ctx, const Schematic& s) const {
+    Schematic::Marks m;
+    m.hovered_node = hovered_node_;
+    m.hovered_net = hovered_net_;
     const Design* design = ctx.panels.design();
     const auto& selection = ctx.panels.selection();
     if (!selection || selection->module != place_.module || selection->path != place_.path)
-        return -1;
+        return m;
     switch (selection->kind) {
-    case Place::Kind::Cell: return s.graph.node_of_cell(selection->cell).index;
+    case Place::Kind::Cell: m.selected_node = s.graph.node_of_cell(selection->cell).index; break;
     case Place::Kind::Port:
-        return s.graph.node_of_port(design->module(selection->module), selection->port).index;
+        m.selected_node =
+            s.graph.node_of_port(design->module(selection->module), selection->port).index;
+        break;
+    case Place::Kind::Net:
+        if (!selection->bits.empty())
+            m.selected_net = s.net_of(selection->bits[0]);
+        break;
     case Place::Kind::None: break;
     }
-    return -1;
+    return m;
 }
 
 // The schematic, or a message saying why there is none.
 void SchematicCanvas::draw_scene(Context& ctx, ImDrawList* dl, ImVec2 origin) {
     const Schematic* s = schematic(ctx);
     hovered_node_ = s && panel_.hovered() ? s->pick(panel_.mouse_world()) : -1;
+    // Wires a few pixels wide are easy to hit at any zoom.
+    hovered_net_ = s && panel_.hovered() && hovered_node_ < 0
+                       ? s->pick_net(panel_.mouse_world(), kNetPickPixels / camera_.zoom())
+                       : -1;
     const Design* design = ctx.panels.design();
     if (!design || !place_.module.valid())
         return;
     const StringPool& names = design->names();
     if (s) {
-        s->draw(dl, camera_, origin, names, ctx.settings.theme == Theme::Light,
-                selected_node(ctx, *s), hovered_node_);
+        s->draw(dl, camera_, origin, names, ctx.settings.theme == Theme::Light, marks(ctx, *s));
         return;
     }
 
@@ -215,7 +240,19 @@ void SchematicCanvas::draw_overlay(Context& ctx, ImVec2 origin) {
     }
 }
 
-void SchematicCanvas::draw_tooltip(const Context& ctx) const {
+void SchematicCanvas::draw_tooltip(Context& ctx) const {
+    if (hovered_net_ >= 0 && shown_ && ImGui::BeginTooltip()) {
+        const DisplayGraph& graph = shown_->graph;
+        const DisplayNet& net = graph.nets()[hovered_net_];
+        std::vector<SigBit> bits = net_bits(graph, net);
+        ImGui::TextUnformatted(ctx.panels.describe_bits(place_.module, bits).c_str());
+        ImGui::TextDisabled("%u bit%s, %u driver%s, %u load%s", net.bit_count,
+                            net.bit_count == 1 ? "" : "s", net.driver_count,
+                            net.driver_count == 1 ? "" : "s", net.load_count,
+                            net.load_count == 1 ? "" : "s");
+        ImGui::EndTooltip();
+        return;
+    }
     if (hovered_node_ < 0 || !shown_ || !ImGui::BeginTooltip())
         return;
     const StringPool& names = ctx.panels.design()->names();
@@ -301,7 +338,10 @@ void SchematicCanvas::handle_events(Context& ctx, const CanvasEvents& events, Re
         return;
     }
     Place picked = Place::place(place_.path, place_.module);
-    if (node && (node->kind == NodeKind::Cell || node->kind == NodeKind::Instance)) {
+    if (!node && hovered_net_ >= 0 && shown_) {
+        picked.kind = Place::Kind::Net;
+        picked.bits = net_bits(shown_->graph, shown_->graph.nets()[hovered_net_]);
+    } else if (node && (node->kind == NodeKind::Cell || node->kind == NodeKind::Instance)) {
         picked.kind = Place::Kind::Cell;
         picked.cell = node->cell;
     } else if (node) {

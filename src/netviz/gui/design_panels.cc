@@ -299,6 +299,7 @@ void DesignPanels::draw_properties(bool* open) {
     switch (selection_->kind) {
     case Selection::Kind::Cell: draw_cell_properties(module, selection_->cell); break;
     case Selection::Kind::Port: draw_port_properties(module, selection_->port); break;
+    case Selection::Kind::Net: draw_net_properties(module, selection_->bits); break;
     case Selection::Kind::None: draw_module_properties(module, selection_->path); break;
     }
     ImGui::End();
@@ -353,14 +354,19 @@ void DesignPanels::draw_module_properties(const Module& module, const std::vecto
     optional_values("Attributes", "mod_attrs", names, module.attributes());
 }
 
-std::string DesignPanels::describe_bits(const Module& module, ModuleId id,
-                                        std::span<const SigBit> bits) {
-    if (bits.empty())
-        return "";
+const Connectivity& DesignPanels::connectivity(const Module& module, ModuleId id) {
     if (!connectivity_ || connectivity_module_ != id) {
         connectivity_ = std::make_unique<Connectivity>(module);
         connectivity_module_ = id;
     }
+    return *connectivity_;
+}
+
+std::string DesignPanels::describe_bits(ModuleId id, std::span<const SigBit> bits) {
+    if (bits.empty() || !design_)
+        return "";
+    const Module& module = design_->module(id);
+    connectivity(module, id);
     const StringPool& names = design_->names();
     // A name for one bit: prefer a wire whose name is not auto-generated.
     auto name_of = [&](SigBit bit, WireBit* out) -> bool {
@@ -438,7 +444,7 @@ void DesignPanels::draw_cell_properties(const Module& module, CellId id) {
             ImGui::TableNextColumn();
             ImGui::Text("%u", pin.width);
             ImGui::TableNextColumn();
-            std::string text = describe_bits(module, selection_->module, module.bits(pin));
+            std::string text = describe_bits(selection_->module, module.bits(pin));
             ImGui::TextUnformatted(text.c_str());
             ImGui::SetItemTooltip("%s", text.c_str());
         }
@@ -463,6 +469,79 @@ void DesignPanels::draw_port_properties(const Module& module, WireId id) {
     ImGui::TextWrapped("%s", names.str(module.name()).c_str());
     ImGui::SeparatorText("Port");
     optional_values("Attributes", "port_attrs", names, wire.attributes);
+}
+
+// A net (the bits of one drawn wire): its names, width, and the pins and
+// ports that drive and load it.
+void DesignPanels::draw_net_properties(const Module& module, std::span<const SigBit> bits) {
+    const StringPool& names = design_->names();
+    const Connectivity& conn = connectivity(module, selection_->module);
+    ImGui::TextDisabled("Net");
+    ImGui::TextWrapped("%s", describe_bits(selection_->module, bits).c_str());
+    ImGui::TextDisabled("Width");
+    ImGui::Text("%zu bit%s", bits.size(), bits.size() == 1 ? "" : "s");
+    ImGui::TextDisabled("In module");
+    ImGui::TextWrapped("%s", names.str(module.name()).c_str());
+
+    // Other names of these bits (aliases), if any.
+    std::vector<WireId> wires;
+    for (SigBit bit : bits)
+        if (!bit.is_constant())
+            for (const WireBit& ref : conn.wire_bits(bit.signal()))
+                if (std::find(wires.begin(), wires.end(), ref.wire) == wires.end())
+                    wires.push_back(ref.wire);
+    if (wires.size() > 1) {
+        ImGui::SeparatorText("Wires");
+        for (size_t i = 0; i < wires.size() && i < kMaxChildren; i++) {
+            const Wire& wire = module.wire(wires[i]);
+            ImGui::Text("%s %s", names.str(wire.name).c_str(), bit_range(wire).c_str());
+        }
+    }
+
+    // Endpoints, each pin or port once.
+    auto endpoints = [&](const char* title, const char* id, bool drivers) {
+        std::vector<Endpoint> seen;
+        for (SigBit bit : bits) {
+            if (bit.is_constant())
+                continue;
+            for (const Endpoint& e :
+                 drivers ? conn.drivers(bit.signal()) : conn.loads(bit.signal())) {
+                bool same = false;
+                for (const Endpoint& s : seen)
+                    same |=
+                        s.kind() == e.kind() && (e.kind() == Endpoint::Kind::CellPin
+                                                     ? s.cell() == e.cell() && s.pin() == e.pin()
+                                                     : s.port() == e.port());
+                if (!same)
+                    seen.push_back(e);
+            }
+        }
+        ImGui::SeparatorText(std::format("{} ({})", title, seen.size()).c_str());
+        if (seen.empty() ||
+            !ImGui::BeginTable(id, 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+            return;
+        for (size_t i = 0; i < seen.size() && i < kMaxChildren; i++) {
+            const Endpoint& e = seen[i];
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            if (e.kind() == Endpoint::Kind::CellPin) {
+                const Cell& cell = module.cell(e.cell());
+                const Pin& pin = module.pins(cell)[e.pin()];
+                ImGui::Text("%s.%s", names.str(cell.name).c_str(), names.str(pin.port).c_str());
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%s", names.str(cell.type).c_str());
+            } else {
+                ImGui::TextUnformatted(names.str(module.wire(e.port()).name).c_str());
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%s port", direction_name(module.wire(e.port()).direction));
+            }
+        }
+        if (seen.size() > kMaxChildren)
+            ImGui::TextDisabled("... %zu more", seen.size() - kMaxChildren);
+        ImGui::EndTable();
+    };
+    endpoints("Drivers", "drivers", true);
+    endpoints("Loads", "loads", false);
 }
 
 } // namespace netviz
