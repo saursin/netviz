@@ -1,0 +1,428 @@
+{
+  "creator": "Yosys 0.51+107 (git sha1 f03b44959, g++ 14.2.1 -fPIC -O3)",
+  "modules": {
+    "$paramod\\popcount\\N=s32'00000000000000000000000000000001": {
+      "attributes": {
+        "dynports": "00000000000000000000000000000001",
+        "hdlname": "popcount",
+        "src": "popcount.v:6.1-23.10"
+      },
+      "parameter_default_values": {
+        "N": "00000000000000000000000000000001",
+        "W": "00000000000000000000000000000001"
+      },
+      "ports": {
+        "in": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "count": {
+          "direction": "output",
+          "bits": [ 2 ]
+        }
+      },
+      "cells": {
+      },
+      "netnames": {
+        "count": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "popcount.v:11.20-11.25"
+          }
+        },
+        "in": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "popcount.v:10.20-10.22"
+          }
+        }
+      }
+    },
+    "$paramod\\popcount\\N=s32'00000000000000000000000000000010": {
+      "attributes": {
+        "dynports": "00000000000000000000000000000001",
+        "hdlname": "popcount",
+        "src": "popcount.v:6.1-23.10"
+      },
+      "parameter_default_values": {
+        "N": "00000000000000000000000000000010",
+        "W": "00000000000000000000000000000010"
+      },
+      "ports": {
+        "in": {
+          "direction": "input",
+          "bits": [ 2, 3 ]
+        },
+        "count": {
+          "direction": "output",
+          "bits": [ 4, 5 ]
+        }
+      },
+      "cells": {
+        "$add$popcount.v:20$4": {
+          "hide_name": 1,
+          "type": "$add",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000001",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000001",
+            "Y_WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+            "src": "popcount.v:20.22-20.29"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 6 ],
+            "B": [ 7 ],
+            "Y": [ 4, 5 ]
+          }
+        },
+        "split.lower": {
+          "hide_name": 0,
+          "type": "$paramod\\popcount\\N=s32'00000000000000000000000000000001",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "popcount.v:18.27-18.63"
+          },
+          "port_directions": {
+            "count": "output",
+            "in": "input"
+          },
+          "connections": {
+            "count": [ 6 ],
+            "in": [ 2 ]
+          }
+        },
+        "split.upper": {
+          "hide_name": 0,
+          "type": "$paramod\\popcount\\N=s32'00000000000000000000000000000001",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "popcount.v:19.27-19.63"
+          },
+          "port_directions": {
+            "count": "output",
+            "in": "input"
+          },
+          "connections": {
+            "count": [ 7 ],
+            "in": [ 3 ]
+          }
+        }
+      },
+      "netnames": {
+        "count": {
+          "hide_name": 0,
+          "bits": [ 4, 5 ],
+          "attributes": {
+            "src": "popcount.v:11.20-11.25"
+          }
+        },
+        "in": {
+          "hide_name": 0,
+          "bits": [ 2, 3 ],
+          "attributes": {
+            "src": "popcount.v:10.20-10.22"
+          }
+        },
+        "split.hi": {
+          "hide_name": 0,
+          "bits": [ 7 ],
+          "attributes": {
+            "src": "popcount.v:17.24-17.26"
+          }
+        },
+        "split.lo": {
+          "hide_name": 0,
+          "bits": [ 6 ],
+          "attributes": {
+            "src": "popcount.v:17.20-17.22"
+          }
+        }
+      }
+    },
+    "$paramod\\popcount\\N=s32'00000000000000000000000000000100": {
+      "attributes": {
+        "dynports": "00000000000000000000000000000001",
+        "hdlname": "popcount",
+        "src": "popcount.v:6.1-23.10"
+      },
+      "parameter_default_values": {
+        "N": "00000000000000000000000000000100",
+        "W": "00000000000000000000000000000011"
+      },
+      "ports": {
+        "in": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5 ]
+        },
+        "count": {
+          "direction": "output",
+          "bits": [ 6, 7, 8 ]
+        }
+      },
+      "cells": {
+        "$add$popcount.v:20$2": {
+          "hide_name": 1,
+          "type": "$add",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000010",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000010",
+            "Y_WIDTH": "00000000000000000000000000000011"
+          },
+          "attributes": {
+            "src": "popcount.v:20.22-20.29"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 9, 10 ],
+            "B": [ 11, 12 ],
+            "Y": [ 6, 7, 8 ]
+          }
+        },
+        "split.lower": {
+          "hide_name": 0,
+          "type": "$paramod\\popcount\\N=s32'00000000000000000000000000000010",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "popcount.v:18.27-18.63"
+          },
+          "port_directions": {
+            "count": "output",
+            "in": "input"
+          },
+          "connections": {
+            "count": [ 9, 10 ],
+            "in": [ 2, 3 ]
+          }
+        },
+        "split.upper": {
+          "hide_name": 0,
+          "type": "$paramod\\popcount\\N=s32'00000000000000000000000000000010",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "popcount.v:19.27-19.63"
+          },
+          "port_directions": {
+            "count": "output",
+            "in": "input"
+          },
+          "connections": {
+            "count": [ 11, 12 ],
+            "in": [ 4, 5 ]
+          }
+        }
+      },
+      "netnames": {
+        "count": {
+          "hide_name": 0,
+          "bits": [ 6, 7, 8 ],
+          "attributes": {
+            "src": "popcount.v:11.20-11.25"
+          }
+        },
+        "in": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "src": "popcount.v:10.20-10.22"
+          }
+        },
+        "split.hi": {
+          "hide_name": 0,
+          "bits": [ 11, 12 ],
+          "attributes": {
+            "src": "popcount.v:17.24-17.26"
+          }
+        },
+        "split.lo": {
+          "hide_name": 0,
+          "bits": [ 9, 10 ],
+          "attributes": {
+            "src": "popcount.v:17.20-17.22"
+          }
+        }
+      }
+    },
+    "$paramod\\popcount\\N=s32'00000000000000000000000000001000": {
+      "attributes": {
+        "dynports": "00000000000000000000000000000001",
+        "hdlname": "popcount",
+        "src": "popcount.v:6.1-23.10"
+      },
+      "parameter_default_values": {
+        "N": "00000000000000000000000000001000",
+        "W": "00000000000000000000000000000100"
+      },
+      "ports": {
+        "in": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5, 6, 7, 8, 9 ]
+        },
+        "count": {
+          "direction": "output",
+          "bits": [ 10, 11, 12, 13 ]
+        }
+      },
+      "cells": {
+        "$add$popcount.v:20$3": {
+          "hide_name": 1,
+          "type": "$add",
+          "parameters": {
+            "A_SIGNED": "00000000000000000000000000000000",
+            "A_WIDTH": "00000000000000000000000000000011",
+            "B_SIGNED": "00000000000000000000000000000000",
+            "B_WIDTH": "00000000000000000000000000000011",
+            "Y_WIDTH": "00000000000000000000000000000100"
+          },
+          "attributes": {
+            "src": "popcount.v:20.22-20.29"
+          },
+          "port_directions": {
+            "A": "input",
+            "B": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 14, 15, 16 ],
+            "B": [ 17, 18, 19 ],
+            "Y": [ 10, 11, 12, 13 ]
+          }
+        },
+        "split.lower": {
+          "hide_name": 0,
+          "type": "$paramod\\popcount\\N=s32'00000000000000000000000000000100",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "popcount.v:18.27-18.63"
+          },
+          "port_directions": {
+            "count": "output",
+            "in": "input"
+          },
+          "connections": {
+            "count": [ 14, 15, 16 ],
+            "in": [ 2, 3, 4, 5 ]
+          }
+        },
+        "split.upper": {
+          "hide_name": 0,
+          "type": "$paramod\\popcount\\N=s32'00000000000000000000000000000100",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "popcount.v:19.27-19.63"
+          },
+          "port_directions": {
+            "count": "output",
+            "in": "input"
+          },
+          "connections": {
+            "count": [ 17, 18, 19 ],
+            "in": [ 6, 7, 8, 9 ]
+          }
+        }
+      },
+      "netnames": {
+        "count": {
+          "hide_name": 0,
+          "bits": [ 10, 11, 12, 13 ],
+          "attributes": {
+            "src": "popcount.v:11.20-11.25"
+          }
+        },
+        "in": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5, 6, 7, 8, 9 ],
+          "attributes": {
+            "src": "popcount.v:10.20-10.22"
+          }
+        },
+        "split.hi": {
+          "hide_name": 0,
+          "bits": [ 17, 18, 19 ],
+          "attributes": {
+            "src": "popcount.v:17.24-17.26"
+          }
+        },
+        "split.lo": {
+          "hide_name": 0,
+          "bits": [ 14, 15, 16 ],
+          "attributes": {
+            "src": "popcount.v:17.20-17.22"
+          }
+        }
+      }
+    },
+    "popcount8": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "popcount.v:25.1-30.10"
+      },
+      "ports": {
+        "in": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5, 6, 7, 8, 9 ]
+        },
+        "count": {
+          "direction": "output",
+          "bits": [ 10, 11, 12, 13 ]
+        }
+      },
+      "cells": {
+        "tree": {
+          "hide_name": 0,
+          "type": "$paramod\\popcount\\N=s32'00000000000000000000000000001000",
+          "parameters": {
+          },
+          "attributes": {
+            "src": "popcount.v:29.21-29.50"
+          },
+          "port_directions": {
+            "count": "output",
+            "in": "input"
+          },
+          "connections": {
+            "count": [ 10, 11, 12, 13 ],
+            "in": [ 2, 3, 4, 5, 6, 7, 8, 9 ]
+          }
+        }
+      },
+      "netnames": {
+        "count": {
+          "hide_name": 0,
+          "bits": [ 10, 11, 12, 13 ],
+          "attributes": {
+            "src": "popcount.v:27.18-27.23"
+          }
+        },
+        "in": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5, 6, 7, 8, 9 ],
+          "attributes": {
+            "src": "popcount.v:26.18-26.20"
+          }
+        }
+      }
+    }
+  }
+}
