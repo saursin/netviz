@@ -450,6 +450,8 @@ void AppUi::register_commands() {
                       }
                       active_canvas().camera().set_zoom(percent / 100.0f);
                   });
+    commands_.add("relayout", "Lay out the active canvas's module again",
+                  [this](const std::vector<std::string>&) { relayout(); });
     commands_.add("reset-view", "Reset pan and zoom",
                   [this](const std::vector<std::string>&) { active_canvas().camera().reset(); });
     commands_.add("grid", "grid on|off: show or hide the canvas grid",
@@ -804,6 +806,15 @@ void AppUi::open_canvas(const SchematicCanvas::Place& place) {
     canvases_.push_back(std::move(canvas));
 }
 
+void AppUi::relayout() {
+    const Design* design = design_.design();
+    ModuleId module = active_canvas().place().module;
+    if (!design || !module.valid())
+        return;
+    log_info("Laying out {} again", design->names().str(design->module(module).name()));
+    schematics_.relayout(module);
+}
+
 void AppUi::reset_canvases(const SchematicCanvas::Place& place) {
     canvases_.resize(1);
     canvases_.front()->navigate(place);
@@ -935,6 +946,8 @@ void AppUi::handle_shortcuts() {
         preferences_.open();
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Q, ImGuiInputFlags_RouteGlobal))
         quit_requested_ = true;
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_L, ImGuiInputFlags_RouteGlobal))
+        relayout();
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_T, ImGuiInputFlags_RouteGlobal))
         open_canvas(active_canvas().place());
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_B, ImGuiInputFlags_RouteGlobal))
@@ -974,6 +987,9 @@ void AppUi::draw_menu_bar() {
         ImGui::Separator();
         if (ImGui::MenuItem("New Canvas", "Ctrl+T"))
             open_canvas(active_canvas().place());
+        if (ImGui::MenuItem("Re-layout", "Ctrl+L", false,
+                            design_.design() && active_canvas().place().module.valid()))
+            relayout();
         if (ImGui::MenuItem("Fit View", "F"))
             active_canvas().fit_view(canvas_context());
         if (ImGui::MenuItem("Reset Layout")) {
@@ -1054,6 +1070,11 @@ void AppUi::draw_toolbar() {
         ImGui::SameLine();
         if (toolbar_button(icons::kResetView, "Fit view (F)"))
             active_canvas().fit_view(canvas_context());
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!design_.design() || !active_canvas().place().module.valid());
+        if (toolbar_button(icons::kRelayout, "Re-layout (Ctrl+L)"))
+            relayout();
+        ImGui::EndDisabled();
         ImGui::PopStyleVar();
     }
     ImGui::End();

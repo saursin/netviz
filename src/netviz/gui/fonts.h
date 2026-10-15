@@ -28,5 +28,6 @@ inline constexpr const char* kTimer = "\xee\x87\xa0";     // timer           U+E
 inline constexpr const char* kCancel = "\xee\x86\xb2";    // x         U+E1B2
 inline constexpr const char* kResetView = "\xee\x89\x97"; // scan       U+E257
 inline constexpr const char* kShown = "\xee\x82\xba";     // eye        U+E0BA
+inline constexpr const char* kRelayout = "\xee\x90\xa5";  // workflow   U+E425
 
 } // namespace netviz::icons

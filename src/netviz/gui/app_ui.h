@@ -74,6 +74,9 @@ class AppUi {
     SchematicCanvas& active_canvas();
     SchematicCanvas::Context canvas_context(float pinch_zoom = 1.0f);
     void open_canvas(const SchematicCanvas::Place& place);
+    // Lays out the active canvas's module again (e.g. after changing layout code
+    // or options); the view is kept.
+    void relayout();
     // Closes all canvases but one and shows `place` (or nothing) in it.
     void reset_canvases(const SchematicCanvas::Place& place);
 

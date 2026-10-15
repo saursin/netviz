@@ -71,6 +71,9 @@ class SchematicService {
     // Stops the running job; its module is not laid out again until retry().
     void cancel();
     void retry(ModuleId module);
+    // Forgets the module's schematic (and stops its job), so it is laid out
+    // again when next asked for.
+    void relayout(ModuleId module);
     // Stops all jobs and forgets everything.
     void clear();
 

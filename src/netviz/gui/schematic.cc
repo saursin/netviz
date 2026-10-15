@@ -301,6 +301,16 @@ void SchematicService::retry(ModuleId module) {
     cancelled_.erase(module.index);
 }
 
+void SchematicService::relayout(ModuleId module) {
+    cancelled_.erase(module.index);
+    if (running_ == module)
+        stop_job();
+    if (auto it = cache_.find(module.index); it != cache_.end()) {
+        cache_bytes_ -= it->second.schematic->bytes;
+        cache_.erase(it);
+    }
+}
+
 void SchematicService::clear() {
     stop_job();
     queue_.clear();
