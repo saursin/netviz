@@ -81,12 +81,41 @@ void DesignPanels::set_design(std::unique_ptr<Design> design, InstanceLists inst
     instances_ = std::move(instances);
     file_ = std::move(file);
     selection_.reset();
+    connectivity_.reset();
     if (design_ && design_->top())
-        selection_ = Selection{*design_->top(), {}};
+        selection_ = Selection::place({}, *design_->top());
 }
 
+// A hierarchy node is highlighted when it is the selected place, or when the
+// selected object is the instance cell that this node stands for.
 bool DesignPanels::is_selected(ModuleId module, const std::vector<CellId>& path) const {
-    return selection_ && selection_->module == module && selection_->path == path;
+    if (!selection_)
+        return false;
+    if (selection_->kind == Selection::Kind::None)
+        return selection_->module == module && selection_->path == path;
+    if (selection_->kind == Selection::Kind::Cell && path.size() == selection_->path.size() + 1 &&
+        path.back() == selection_->cell)
+        return std::equal(selection_->path.begin(), selection_->path.end(), path.begin());
+    return false;
+}
+
+ModuleId DesignPanels::module_at(const std::vector<CellId>& path) const {
+    ModuleId module = *design_->top();
+    for (CellId cell : path)
+        module = *design_->find_module(design_->module(module).cell(cell).type);
+    return module;
+}
+
+std::vector<std::string> DesignPanels::path_labels(const std::vector<CellId>& path) const {
+    std::vector<std::string> labels;
+    ModuleId module = *design_->top();
+    labels.push_back(design_->names().str(design_->module(module).name()));
+    for (CellId cell_id : path) {
+        const Cell& cell = design_->module(module).cell(cell_id);
+        labels.push_back(design_->names().str(cell.name));
+        module = *design_->find_module(cell.type);
+    }
+    return labels;
 }
 
 // "top.u1.u2" for an instance path.
@@ -120,7 +149,7 @@ void DesignPanels::draw_instance_tree(ModuleId module, const char* name, const c
 
     bool open = ImGui::TreeNodeEx(name, flags);
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
-        selection_ = Selection{module, path};
+        selection_ = Selection::place(path, module);
     if (type) {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", type);
@@ -151,7 +180,7 @@ void DesignPanels::draw_module_list() {
         const Module& module = modules[m];
         std::string label = std::format("{}##m{}", names.str(module.name()), m);
         if (ImGui::Selectable(label.c_str(), is_selected(ModuleId(m), {})))
-            selection_ = Selection{ModuleId(m), {}};
+            selection_ = Selection::place({}, ModuleId(m));
         ImGui::SameLine();
         ImGui::TextDisabled("%zu cells", module.cells().size());
     };
@@ -213,10 +242,17 @@ void DesignPanels::draw_properties(bool* open) {
         ImGui::End();
         return;
     }
-
-    const StringPool& names = design_->names();
     const Module& module = design_->module(selection_->module);
-    const std::vector<CellId>& path = selection_->path;
+    switch (selection_->kind) {
+    case Selection::Kind::Cell: draw_cell_properties(module, selection_->cell); break;
+    case Selection::Kind::Port: draw_port_properties(module, selection_->port); break;
+    case Selection::Kind::None: draw_module_properties(module, selection_->path); break;
+    }
+    ImGui::End();
+}
+
+void DesignPanels::draw_module_properties(const Module& module, const std::vector<CellId>& path) {
+    const StringPool& names = design_->names();
 
     if (!path.empty()) {
         ImGui::TextDisabled("Instance");
@@ -262,8 +298,118 @@ void DesignPanels::draw_properties(bool* open) {
     ImGui::SeparatorText("Module");
     optional_values("Parameters", "mod_params", names, module.parameters());
     optional_values("Attributes", "mod_attrs", names, module.attributes());
+}
 
-    ImGui::End();
+std::string DesignPanels::describe_bits(const Module& module, ModuleId id,
+                                        std::span<const SigBit> bits) {
+    if (bits.empty())
+        return "";
+    if (!connectivity_ || connectivity_module_ != id) {
+        connectivity_ = std::make_unique<Connectivity>(module);
+        connectivity_module_ = id;
+    }
+    const StringPool& names = design_->names();
+    // A name for one bit: prefer a wire whose name is not auto-generated.
+    auto name_of = [&](SigBit bit, WireBit* out) -> bool {
+        if (bit.is_constant())
+            return false;
+        std::span<const WireBit> refs = connectivity_->wire_bits(bit.signal());
+        if (refs.empty())
+            return false;
+        *out = refs[0];
+        for (const WireBit& ref : refs)
+            if (!module.wire(ref.wire).hidden) {
+                *out = ref;
+                break;
+            }
+        return true;
+    };
+    // All bits consecutive in one wire: "w[hi:lo]" (or just "w" for the whole wire).
+    WireBit first;
+    bool whole = name_of(bits[0], &first);
+    for (size_t i = 1; whole && i < bits.size(); i++) {
+        WireBit ref;
+        whole = name_of(bits[i], &ref) && ref.wire == first.wire && ref.offset == first.offset + i;
+    }
+    if (whole) {
+        const Wire& wire = module.wire(first.wire);
+        const std::string& name = names.str(wire.name);
+        if (bits.size() == wire.width && wire.width > 1)
+            return name;
+        int64_t lo = bit_index(wire, first.offset);
+        int64_t hi = bit_index(wire, first.offset + static_cast<uint32_t>(bits.size()) - 1);
+        if (wire.width == 1)
+            return name;
+        return bits.size() == 1
+                   ? std::format("{}[{}]", name, lo)
+                   : std::format("{}[{}:{}]", name, std::max(lo, hi), std::min(lo, hi));
+    }
+    std::string text;
+    for (size_t i = 0; i < bits.size() && i < 3; i++) {
+        WireBit ref;
+        if (i)
+            text += ", ";
+        if (bits[i].is_constant())
+            text += "const";
+        else if (name_of(bits[i], &ref))
+            text += std::format("{}[{}]", names.str(module.wire(ref.wire).name),
+                                bit_index(module.wire(ref.wire), ref.offset));
+        else
+            text += "?";
+    }
+    if (bits.size() > 3)
+        text += std::format(", ... ({} bits)", bits.size());
+    return text;
+}
+
+void DesignPanels::draw_cell_properties(const Module& module, CellId id) {
+    const StringPool& names = design_->names();
+    const Cell& cell = module.cell(id);
+    std::optional<ModuleId> type = design_->find_module(cell.type);
+    bool instance = type && !design_->module(*type).is_blackbox();
+    ImGui::TextDisabled(instance ? "Instance" : "Cell");
+    ImGui::TextWrapped("%s", names.str(cell.name).c_str());
+    ImGui::TextDisabled("Type");
+    ImGui::TextWrapped("%s", names.str(cell.type).c_str());
+    ImGui::TextDisabled("In module");
+    ImGui::TextWrapped("%s", names.str(module.name()).c_str());
+
+    ImGui::SeparatorText("Pins");
+    if (ImGui::BeginTable("pins", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        for (const Pin& pin : module.pins(cell)) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(names.str(pin.port).c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(direction_name(pin.direction));
+            ImGui::TableNextColumn();
+            ImGui::Text("%u", pin.width);
+            ImGui::TableNextColumn();
+            std::string text = describe_bits(module, selection_->module, module.bits(pin));
+            ImGui::TextUnformatted(text.c_str());
+            ImGui::SetItemTooltip("%s", text.c_str());
+        }
+        ImGui::EndTable();
+    }
+    ImGui::SeparatorText("Cell");
+    optional_values("Parameters", "cell_params", names, cell.parameters);
+    optional_values("Attributes", "cell_attrs", names, cell.attributes);
+}
+
+void DesignPanels::draw_port_properties(const Module& module, WireId id) {
+    const StringPool& names = design_->names();
+    const Wire& wire = module.wire(id);
+    ImGui::TextDisabled("Port");
+    ImGui::TextWrapped("%s %s", names.str(wire.name).c_str(), bit_range(wire).c_str());
+    ImGui::TextDisabled("Direction");
+    ImGui::TextUnformatted(direction_name(wire.direction));
+    ImGui::TextDisabled("Width");
+    ImGui::Text("%u bit%s%s", wire.width, wire.width == 1 ? "" : "s",
+                wire.is_signed ? ", signed" : "");
+    ImGui::TextDisabled("In module");
+    ImGui::TextWrapped("%s", names.str(module.name()).c_str());
+    ImGui::SeparatorText("Port");
+    optional_values("Attributes", "port_attrs", names, wire.attributes);
 }
 
 } // namespace netviz

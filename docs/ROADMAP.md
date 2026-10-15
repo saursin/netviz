@@ -23,12 +23,14 @@ waveforms and timing, and scriptable.
 - Yosys JSON import (`netviz_io`, simdjson) with background loading, Design
   (hierarchy) and Properties panels, `dump`/`check` console commands, and five
   example designs in [ex/](../ex) with increasing hierarchy depth.
+- Schematic of the selected module (milestone 2a): display graph, grid-aligned
+  layered layout in the background with cancel, culled drawing, picking,
+  selection and navigation into instances ([LAYOUT.md](LAYOUT.md)).
 
 ## Foundation milestones
 
-1. **Visual graph and schematic rendering**: derive nodes/pins/edges from a module
-   (or from a cone), a first left-to-right layout, culling and level of detail,
-   then batched GPU drawing once large designs need it.
+1. **Large modules (milestone 2b)**: level of detail by zoom, batched GPU
+   drawing, and measuring and lifting the 50k-node layout guard.
 
 Follow-ups from import: lower peak memory while loading large files (simdjson's
 streaming "on demand" API instead of a whole-file document: a 333 MB netlist

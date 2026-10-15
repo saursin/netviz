@@ -18,19 +18,12 @@ struct CanvasColors {
     ImU32 minor_line;
     ImU32 major_line;
     ImU32 axis_line;
-    ImU32 shape_fill;
-    ImU32 shape_outline;
 };
 
-const CanvasColors kDarkColors = {IM_COL32(24, 26, 30, 255),   IM_COL32(255, 255, 255, 14),
-                                  IM_COL32(255, 255, 255, 34), IM_COL32(90, 140, 220, 110),
-                                  IM_COL32(60, 90, 140, 160),  IM_COL32(120, 170, 240, 255)};
+const CanvasColors kDarkColors = {IM_COL32(24, 26, 30, 255), IM_COL32(255, 255, 255, 14),
+                                  IM_COL32(255, 255, 255, 34), IM_COL32(90, 140, 220, 110)};
 const CanvasColors kLightColors = {IM_COL32(246, 247, 249, 255), IM_COL32(0, 0, 0, 16),
-                                   IM_COL32(0, 0, 0, 40),        IM_COL32(40, 100, 200, 120),
-                                   IM_COL32(170, 200, 240, 200), IM_COL32(40, 100, 200, 255)};
-
-// Placeholder scene object, in world units, until netlists are rendered.
-const Rect kPlaceholderRect = {Vec2{-80.0f, -50.0f}, Vec2{80.0f, 50.0f}};
+                                   IM_COL32(0, 0, 0, 40), IM_COL32(40, 100, 200, 120)};
 
 // Draws grid lines only inside the visible world rectangle, with a spacing
 // picked from the zoom level. Cost depends on the window size, not on how
@@ -63,8 +56,10 @@ void draw_grid(ImDrawList* dl, const Camera2D& camera, const CanvasColors& color
 
 } // namespace
 
-void CanvasPanel::draw(Camera2D& camera, const CanvasOptions& options, float pinch_zoom) {
+CanvasEvents CanvasPanel::draw(Camera2D& camera, const CanvasOptions& options, float pinch_zoom,
+                               const SceneFn& scene, const OverlayFn& overlay) {
     hovered_ = false;
+    CanvasEvents events;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     bool visible = ImGui::Begin(kWindowName, nullptr,
@@ -72,18 +67,20 @@ void CanvasPanel::draw(Camera2D& camera, const CanvasOptions& options, float pin
     ImGui::PopStyleVar();
     if (!visible) {
         ImGui::End();
-        return;
+        return events;
     }
 
     ImVec2 origin = ImGui::GetCursorScreenPos();
     ImVec2 size = ImGui::GetContentRegionAvail();
     if (size.x < 1.0f || size.y < 1.0f) {
         ImGui::End();
-        return;
+        return events;
     }
     camera.set_viewport_size(Vec2{size.x, size.y});
 
-    // One invisible item covering the canvas captures mouse input.
+    // One invisible item covering the canvas captures mouse input; overlay
+    // widgets submitted later may overlap it and take input first.
+    ImGui::SetNextItemAllowOverlap();
     ImGui::InvisibleButton("canvas", size,
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
                                ImGuiButtonFlags_MouseButtonMiddle);
@@ -120,9 +117,12 @@ void CanvasPanel::draw(Camera2D& camera, const CanvasOptions& options, float pin
         }
     }
 
-    // Reset view.
-    if (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(ImGuiKey_F, false))
-        camera.reset();
+    events.clicked = hovered_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    events.double_clicked = hovered_ && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+    if (ImGui::IsWindowFocused()) {
+        events.fit_requested = ImGui::IsKeyPressed(ImGuiKey_F, false);
+        events.up_requested = ImGui::IsKeyPressed(ImGuiKey_Backspace, false);
+    }
 
     mouse_world_ = camera.screen_to_world(mouse);
 
@@ -133,16 +133,14 @@ void CanvasPanel::draw(Camera2D& camera, const CanvasOptions& options, float pin
     dl->AddRectFilled(origin, end, colors.background);
     if (options.show_grid)
         draw_grid(dl, camera, colors, origin, size);
-
-    Vec2 a = camera.world_to_screen(kPlaceholderRect.min);
-    Vec2 b = camera.world_to_screen(kPlaceholderRect.max);
-    ImVec2 p0(origin.x + a.x, origin.y + a.y);
-    ImVec2 p1(origin.x + b.x, origin.y + b.y);
-    dl->AddRectFilled(p0, p1, colors.shape_fill);
-    dl->AddRect(p0, p1, colors.shape_outline, 0.0f, 1.5f);
+    if (scene)
+        scene(dl, origin);
     dl->PopClipRect();
 
+    if (overlay)
+        overlay(origin);
     ImGui::End();
+    return events;
 }
 
 } // namespace netviz

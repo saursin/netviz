@@ -365,6 +365,9 @@ void AppUi::read_setting(const std::string& key, const std::string& value) {
         settings_.min_zoom = std::clamp(std::strtof(value.c_str(), nullptr), 1e-4f, 1.0f);
     else if (key == "MaxZoom")
         settings_.max_zoom = std::clamp(std::strtof(value.c_str(), nullptr), 1.0f, 1000.0f);
+    else if (key == "MaxSchematicNodes")
+        settings_.max_schematic_nodes = static_cast<uint32_t>(
+            std::clamp(std::strtol(value.c_str(), nullptr, 10), 1000L, 10000000L));
 }
 
 std::string AppUi::write_settings() const {
@@ -380,6 +383,7 @@ std::string AppUi::write_settings() const {
     out << "ShowPerfStats=" << settings_.show_perf_stats << "\n";
     out << "MinZoom=" << settings_.min_zoom << "\n";
     out << "MaxZoom=" << settings_.max_zoom << "\n";
+    out << "MaxSchematicNodes=" << settings_.max_schematic_nodes << "\n";
     for (const std::string& path : recent_files_)
         out << "Recent=" << path << "\n";
     out << "\n";
@@ -571,6 +575,8 @@ void AppUi::close_design() {
     if (!design_.design())
         return;
     log_info("Closed {}", design_.file());
+    schematic_.clear(); // its layout job reads the design
+    module_views_.clear();
     design_.set_design(nullptr, {}, "");
     window_->set_title("netviz");
 }
@@ -674,6 +680,8 @@ void AppUi::poll_loading() {
         log_warn("... {} more issues (run 'check' to list them)",
                  result.issues.size() - kMaxIssuesLogged);
 
+    schematic_.clear();
+    module_views_.clear();
     design_.set_design(std::move(result.design), std::move(loaded.instances), path);
     log_design_stats(&result.timings);
     add_recent_file(path);
@@ -829,10 +837,250 @@ void AppUi::draw_recent_menu() {
 }
 
 void AppUi::shutdown() {
+    schematic_.clear();
     if (loading_.valid()) {
         cancel_loading();
         loading_.wait();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Schematic
+// ---------------------------------------------------------------------------
+
+// Shows the module of the current selection, starting its layout if needed.
+void AppUi::update_schematic() {
+    const Design* design = design_.design();
+    const auto& selection = design_.selection();
+    if (!design || !selection) {
+        if (schematic_.state() != SchematicView::State::Empty)
+            schematic_.clear();
+        return;
+    }
+    schematic_.set_max_nodes(settings_.max_schematic_nodes);
+    if (schematic_.state() == SchematicView::State::Ready &&
+        schematic_.module() != selection->module)
+        module_views_[schematic_.module().index] = {camera_.center(), camera_.zoom()};
+    schematic_.show(*design, selection->module);
+    if (schematic_.poll())
+        fit_pending_ = true;
+}
+
+void AppUi::restore_or_fit_view() {
+    auto it = module_views_.find(schematic_.module().index);
+    if (it == module_views_.end()) {
+        fit_view();
+        return;
+    }
+    camera_.set_center(it->second.center);
+    camera_.set_zoom(it->second.zoom);
+}
+
+void AppUi::fit_view() {
+    if (schematic_.state() == SchematicView::State::Ready)
+        camera_.fit(schematic_.layout()->bounds);
+    else
+        camera_.reset();
+}
+
+int64_t AppUi::selected_node() const {
+    const Design* design = design_.design();
+    const auto& selection = design_.selection();
+    if (!design || !selection || schematic_.state() != SchematicView::State::Ready ||
+        selection->module != schematic_.module())
+        return -1;
+    const DisplayGraph& graph = *schematic_.graph();
+    switch (selection->kind) {
+    case DesignPanels::Selection::Kind::Cell: return graph.node_of_cell(selection->cell).index;
+    case DesignPanels::Selection::Kind::Port:
+        return graph.node_of_port(design->module(selection->module), selection->port).index;
+    case DesignPanels::Selection::Kind::None: break;
+    }
+    return -1;
+}
+
+void AppUi::draw_canvas() {
+    CanvasOptions options;
+    options.show_grid = settings_.show_grid;
+    options.light_theme = settings_.theme == Theme::Light;
+    CanvasEvents events = canvas_.draw(
+        camera_, options, window_->take_pinch_zoom(),
+        [this](ImDrawList* dl, ImVec2 origin) { draw_schematic_scene(dl, origin); },
+        [this](ImVec2 origin) { draw_canvas_overlay(origin); });
+    handle_canvas_events(events);
+    draw_node_tooltip(hovered_node_);
+}
+
+// The schematic, or a message saying why there is none.
+void AppUi::draw_schematic_scene(ImDrawList* dl, ImVec2 origin) {
+    if (fit_pending_) {
+        restore_or_fit_view();
+        fit_pending_ = false;
+    }
+    hovered_node_ = canvas_.hovered() ? schematic_.pick(canvas_.mouse_world()) : -1;
+    const Design* design = design_.design();
+    if (!design)
+        return;
+    const StringPool& names = design->names();
+    if (schematic_.state() == SchematicView::State::Ready) {
+        schematic_.draw(dl, camera_, origin, names, settings_.theme == Theme::Light,
+                        selected_node(), hovered_node_);
+        return;
+    }
+
+    std::string message;
+    const std::string& module = names.str(design->module(schematic_.module()).name());
+    switch (schematic_.state()) {
+    case SchematicView::State::Building: message = std::format("Laying out {} ...", module); break;
+    case SchematicView::State::TooLarge:
+        message =
+            std::format("{} has {} cells and ports, more than the schematic limit of {}.\n"
+                        "Open a submodule from the Hierarchy, or raise the limit in\n"
+                        "Settings > Preferences > Canvas (large schematics are slow to draw).",
+                        module, format_count(schematic_.node_count()),
+                        format_count(settings_.max_schematic_nodes));
+        break;
+    case SchematicView::State::Cancelled:
+        message = std::format("Layout of {} stopped.", module);
+        break;
+    default: return;
+    }
+    Vec2 size = camera_.viewport_size();
+    ImVec2 text = ImGui::CalcTextSize(message.c_str());
+    ImVec2 at(std::floor(origin.x + (size.x - text.x) * 0.5f),
+              std::floor(origin.y + (size.y - text.y) * 0.5f));
+    dl->AddText(at, ImGui::GetColorU32(ImGuiCol_TextDisabled), message.c_str());
+}
+
+// Breadcrumbs of the shown place (click one to go up) and, after a cancelled
+// layout, a button to run it again.
+void AppUi::draw_canvas_overlay(ImVec2 origin) {
+    const Design* design = design_.design();
+    const auto& selection = design_.selection();
+    if (!design || !selection)
+        return;
+    const StringPool& names = design->names();
+    const ImGuiStyle& style = ImGui::GetStyle();
+
+    if (schematic_.state() == SchematicView::State::Cancelled) {
+        Vec2 size = camera_.viewport_size();
+        const char* label = "Lay Out Again";
+        float width = ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.0f;
+        ImGui::SetCursorScreenPos(
+            ImVec2(std::floor(origin.x + (size.x - width) * 0.5f),
+                   std::floor(origin.y + size.y * 0.5f + ImGui::GetTextLineHeightWithSpacing())));
+        if (ImGui::Button(label))
+            schematic_.reset_current(); // update_schematic() starts it again next frame
+    }
+
+    ImGui::SetCursorScreenPos(
+        ImVec2(origin.x + style.WindowPadding.x, origin.y + style.WindowPadding.y));
+    auto module_name = [&](ModuleId m) { return names.str(design->module(m).name()); };
+    bool definition = selection->path.empty() && selection->module != *design->top();
+    std::vector<std::string> labels;
+    if (definition)
+        labels.push_back(module_name(selection->module));
+    else
+        labels = design_.path_labels(selection->path);
+    std::optional<DesignPanels::Selection> go_to;
+    ImGui::PushStyleColor(ImGuiCol_Button, style.Colors[ImGuiCol_FrameBg]);
+    for (size_t i = 0; i < labels.size(); i++) {
+        std::vector<CellId> prefix(selection->path.begin(), selection->path.begin() + i);
+        std::string label = labels[i];
+        if (i > 0)
+            label += std::format(" ({})", module_name(design_.module_at(prefix)));
+        if (i > 0) {
+            ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+            ImGui::TextDisabled("›");
+            ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+        }
+        ImGui::PushID(static_cast<int>(i));
+        bool current = i + 1 == labels.size();
+        ImGui::BeginDisabled(current);
+        if (ImGui::SmallButton(label.c_str()) && !current)
+            go_to = DesignPanels::Selection::place(prefix, design_.module_at(prefix));
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    }
+    ImGui::PopStyleColor();
+    if (go_to)
+        design_.select(*go_to);
+}
+
+void AppUi::draw_node_tooltip(int64_t node) {
+    if (node < 0 || !ImGui::BeginTooltip())
+        return;
+    const StringPool& names = design_.design()->names();
+    const DisplayGraph& graph = *schematic_.graph();
+    const DisplayNode& n = graph.nodes()[node];
+    ImGui::TextUnformatted(names.str(n.name).c_str());
+    switch (n.kind) {
+    case NodeKind::Cell:
+        ImGui::TextDisabled("%s, %u pins", names.str(n.type).c_str(), n.pin_count);
+        break;
+    case NodeKind::Instance:
+        ImGui::TextDisabled("instance of %s, %u pins", names.str(n.type).c_str(), n.pin_count);
+        ImGui::TextDisabled("Double-click to open");
+        break;
+    default: {
+        const char* direction = n.kind == NodeKind::InputPort    ? "input"
+                                : n.kind == NodeKind::OutputPort ? "output"
+                                                                 : "inout";
+        ImGui::TextDisabled("%s port, %u bits", direction, graph.pins_of(n)[0].width);
+        break;
+    }
+    }
+    ImGui::EndTooltip();
+}
+
+// Click selects the cell or port under the cursor (or clears the selection),
+// double-clicking an instance opens its module, Backspace goes back up.
+void AppUi::handle_canvas_events(const CanvasEvents& events) {
+    using Selection = DesignPanels::Selection;
+    if (events.fit_requested)
+        fit_view();
+    const Design* design = design_.design();
+    const auto& current = design_.selection();
+    if (!design || !current || current->module != schematic_.module())
+        return;
+    Selection selection = *current;
+
+    if (events.up_requested && !selection.path.empty()) {
+        std::vector<CellId> path = selection.path;
+        CellId instance = path.back();
+        path.pop_back();
+        Selection up = Selection::place(path, design_.module_at(path));
+        up.kind = Selection::Kind::Cell; // highlight where we came from
+        up.cell = instance;
+        design_.select(up);
+        return;
+    }
+    if (!events.clicked)
+        return;
+    if (hovered_node_ < 0) {
+        design_.select(Selection::place(selection.path, selection.module));
+        return;
+    }
+    const DisplayNode& node = schematic_.graph()->nodes()[hovered_node_];
+    if (events.double_clicked && node.kind == NodeKind::Instance) {
+        const Module& module = design->module(selection.module);
+        ModuleId child = *design->find_module(module.cell(node.cell).type);
+        bool definition = selection.path.empty() && selection.module != *design->top();
+        std::vector<CellId> path = selection.path;
+        if (!definition) // inside a module definition there is no instance path
+            path.push_back(node.cell);
+        design_.select(Selection::place(std::move(path), child));
+        return;
+    }
+    Selection picked = Selection::place(selection.path, selection.module);
+    if (node.kind == NodeKind::Cell || node.kind == NodeKind::Instance) {
+        picked.kind = Selection::Kind::Cell;
+        picked.cell = node.cell;
+    } else {
+        picked.kind = Selection::Kind::Port;
+        picked.port = node.port;
+    }
+    design_.select(picked);
 }
 
 // ---------------------------------------------------------------------------
@@ -851,8 +1099,9 @@ void AppUi::draw() {
     while (std::optional<std::string> path = window_->take_opened_file())
         open_file(*path);
     poll_loading();
-    // Redraw 10 times a second while loading so the progress bar moves.
-    window_->set_idle_timeout_ms(loading_.valid() ? 100 : 500);
+    update_schematic();
+    // Redraw 10 times a second while busy so the progress display moves.
+    window_->set_idle_timeout_ms(loading_.valid() || schematic_.busy() ? 100 : 500);
 
     handle_shortcuts();
     draw_menu_bar();
@@ -867,10 +1116,7 @@ void AppUi::draw() {
     }
     ImGui::DockSpaceOverViewport(dockspace_id, ImGui::GetMainViewport());
 
-    CanvasOptions canvas_options;
-    canvas_options.show_grid = settings_.show_grid;
-    canvas_options.light_theme = settings_.theme == Theme::Light;
-    canvas_.draw(camera_, canvas_options, window_->take_pinch_zoom());
+    draw_canvas();
     if (settings_.show_hierarchy)
         design_.draw_hierarchy(&settings_.show_hierarchy);
     if (settings_.show_modules)
@@ -952,8 +1198,8 @@ void AppUi::draw_menu_bar() {
         ImGui::MenuItem("Properties", nullptr, &settings_.show_properties);
         ImGui::MenuItem("Console", "Ctrl+`", &settings_.show_console);
         ImGui::Separator();
-        if (ImGui::MenuItem("Reset View", "F"))
-            camera_.reset();
+        if (ImGui::MenuItem("Fit View", "F"))
+            fit_view();
         if (ImGui::MenuItem("Reset Layout")) {
             settings_.show_hierarchy = true;
             settings_.show_modules = true;
@@ -1029,8 +1275,8 @@ void AppUi::draw_toolbar() {
             camera_.zoom_at(center, 1.0f / kToolbarZoomStep);
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (toolbar_button(icons::kResetView, "Reset view (F)"))
-            camera_.reset();
+        if (toolbar_button(icons::kResetView, "Fit view (F)"))
+            fit_view();
         ImGui::PopStyleVar();
     }
     ImGui::End();
@@ -1072,6 +1318,25 @@ void AppUi::draw_status_bar() {
             ImGui::TextDisabled("%zu", design->modules().size());
             ImGui::EndGroup();
             ImGui::SetItemTooltip("%zu modules", design->modules().size());
+            if (schematic_.busy()) {
+                LayoutStage stage = schematic_.stage();
+                const char* label = stage == LayoutStage::Ranking    ? "ranking"
+                                    : stage == LayoutStage::Ordering ? "ordering"
+                                    : stage == LayoutStage::Placing  ? "placing"
+                                                                     : "routing";
+                ImGui::SameLine(0.0f, ImGui::GetFontSize() * 1.5f);
+                const Module& module = design->module(schematic_.module());
+                ImGui::Text("Laying out %s:", design->names().str(module.name()).c_str());
+                ImGui::SameLine();
+                fixed_width_text(label, "ordering");
+                float mid_y = ImGui::GetWindowPos().y + ImGui::GetWindowHeight() * 0.5f;
+                float size = ImGui::GetTextLineHeight() + 2.0f;
+                ImGui::SameLine();
+                ImGui::SetCursorScreenPos(
+                    ImVec2(ImGui::GetCursorScreenPos().x, mid_y - size * 0.5f));
+                if (icon_button(icons::kCancel, "Stop laying out", size))
+                    schematic_.cancel();
+            }
         } else {
             ImGui::TextDisabled("No design loaded");
         }

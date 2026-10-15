@@ -37,11 +37,12 @@ void PreferencesWindow::copy_config(const Settings& from, Settings& to) {
     to.ui_scale = from.ui_scale;
     to.min_zoom = from.min_zoom;
     to.max_zoom = from.max_zoom;
+    to.max_schematic_nodes = from.max_schematic_nodes;
 }
 
 bool PreferencesWindow::same_config(const Settings& a, const Settings& b) {
     return a.theme == b.theme && a.ui_scale == b.ui_scale && a.min_zoom == b.min_zoom &&
-           a.max_zoom == b.max_zoom;
+           a.max_zoom == b.max_zoom && a.max_schematic_nodes == b.max_schematic_nodes;
 }
 
 void PreferencesWindow::draw(Settings& settings) {
@@ -91,6 +92,7 @@ void PreferencesWindow::draw(Settings& settings) {
         } else {
             draft_.min_zoom = defaults.min_zoom;
             draft_.max_zoom = defaults.max_zoom;
+            draft_.max_schematic_nodes = defaults.max_schematic_nodes;
         }
     }
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -156,6 +158,18 @@ void PreferencesWindow::draw_canvas(Settings& settings) {
     if (ImGui::InputFloat("##max_zoom", &max_percent, 0.0f, 0.0f, "%.0f %%"))
         settings.max_zoom = std::clamp(max_percent, 100.0f, 100000.0f) / 100.0f;
     ImGui::SetItemTooltip("Largest zoom level, in percent (100 - 100000)");
+    ImGui::EndTable();
+
+    ImGui::SeparatorText("Schematic");
+    if (!begin_rows("schematic"))
+        return;
+    row_label("Largest schematic");
+    int nodes = static_cast<int>(settings.max_schematic_nodes);
+    if (ImGui::InputInt("##max_nodes", &nodes, 10000, 100000))
+        settings.max_schematic_nodes = static_cast<uint32_t>(std::clamp(nodes, 1000, 10000000));
+    ImGui::SetItemTooltip("Modules with more cells and ports than this are not drawn.\n"
+                          "Large schematics take a while to lay out and are slow to pan\n"
+                          "and zoom when zoomed out (1,000 - 10,000,000)");
     ImGui::EndTable();
 }
 

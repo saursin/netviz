@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace netviz {
 
 enum class Theme { Dark, Light };
@@ -11,6 +13,9 @@ struct Settings {
     float ui_scale = 1.0f;  // on top of the display's own scale
     float min_zoom = 0.01f; // canvas zoom limits (1.0 = 100%)
     float max_zoom = 32.0f;
+    // Modules with more display nodes (cells and ports) are not laid out or
+    // drawn: large ones are slow to draw until level of detail exists.
+    uint32_t max_schematic_nodes = 50000;
 
     // Quick view toggles (menus)
     bool show_grid = true;

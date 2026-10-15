@@ -19,8 +19,13 @@ Sections marked *(planned)* describe design intent, not existing code.
             +---------------+---------------+
                             |
             +---------------v---------------+
-            |  view                         |   camera, visual graph, layout,
-            |                               |   spatial index, LOD   (no UI deps)
+            |  layout                       |   layout contract, layered
+            |                               |   layout             (no UI deps)
+            +---------------+---------------+
+                            |
+            +---------------v---------------+
+            |  view                         |   camera, display graph,
+            |                               |   spatial index      (no UI deps)
             +---------------+---------------+
                             |
             +---------------v---------------+       +--------------------------+
@@ -32,8 +37,8 @@ Sections marked *(planned)* describe design intent, not existing code.
 ```
 
 Each layer is a CMake library and may only depend on the layers below it. This
-is enforced by target links: `core` and `view` do not link ImGui/SDL/GL, so an
-accidental include fails to build.
+is enforced by target links: `core`, `view` and `layout` do not link
+ImGui/SDL/GL, so an accidental include fails to build.
 
 File importers (Yosys JSON today, later Liberty/RTLIL) translate formats into the
 core IR. They live in `netviz_io` on top of `core`, so the core never depends on a
@@ -62,19 +67,22 @@ Specified in [IR.md](IR.md) (`netlist.h`, `connectivity.h`). In short:
 - Importers (Yosys JSON next, later Liberty/RTLIL) live outside the core and
   translate their formats into this IR.
 
-## View *(partly implemented)*
+## View and layout
 
-- `Camera2D` (implemented) maps world ↔ screen. It is the only state that
-  changes on pan/zoom.
-- *(planned)* A visual graph derived from one module: nodes (cells, ports),
-  pins and edges (nets, possibly split per bit/bus), each with a stable id that
-  maps back to the IR, plus positions and routed edge geometry.
-- *(planned)* Layout engines behind a small interface (`run(graph) → positions`),
-  run on a worker thread; the UI shows the previous layout until done.
-- *(planned)* A uniform-grid spatial index over node bounds and edge segments
-  for viewport culling and O(1)-ish mouse picking.
-- *(planned)* Level of detail by zoom: at low zoom draw only cell boxes (or
-  cluster summaries), add pins, labels and individual wires as zoom increases.
+Described in [LAYOUT.md](LAYOUT.md).
+
+- `Camera2D` maps world ↔ screen. It is the only state that changes on
+  pan/zoom; `fit()` frames a rectangle.
+- `DisplayGraph` (`view`) is a read-only drawing view of one module: nodes
+  (cells, instances, ports), pins on fixed sides and nets bundled only where
+  that cannot show a false connection. Ids map back to the IR.
+- `layered_layout()` (`layout`) turns a `DisplayGraph` into a `LayoutResult`:
+  node boxes, pin positions and orthogonal wire segments, all on a grid. The
+  contract in `layout.h` is algorithm independent so other engines can plug in.
+- `SpatialGrid` (`view`) is a uniform grid over node boxes for viewport
+  culling and picking.
+- *(planned, milestone 2b)* Level of detail by zoom and batched GPU drawing for
+  large modules.
 
 ## GUI
 
@@ -109,9 +117,21 @@ Specified in [IR.md](IR.md) (`netlist.h`, `connectivity.h`). In short:
 - `ConsolePanel` is a log sink with a bounded buffer, drawn with
   `ImGuiListClipper` so only visible lines are submitted, plus a command input
   line that runs `CommandRegistry` commands.
-- `CanvasPanel` handles pan/zoom input (scroll, drag, Ctrl+scroll, pinch) and
-  today draws a background grid generated only for the visible area, plus a
-  placeholder rectangle.
+- `CanvasPanel` handles pan/zoom input (scroll, drag, Ctrl+scroll, pinch),
+  draws a background grid generated only for the visible area, calls back to
+  draw the scene and overlay widgets, and reports clicks and keys
+  (`CanvasEvents`) to its owner.
+- `SchematicView` shows the selected module: it builds the display graph and
+  layout on a `std::jthread` (stop requested when the module changes, the
+  design closes or the user cancels), installs the result on the UI thread,
+  and draws and picks it. Finished schematics are cached per module (every
+  instance of a module shares one) within a 256 MB budget, least recently
+  shown dropped first, so going back to a module is instant; the cache is
+  emptied when the design closes or reloads. `AppUi` likewise remembers the
+  pan and zoom of each module and restores them when going back to it. `AppUi` connects it to the selection: clicking a cell
+  or port selects it (Properties shows it), double-clicking an instance opens
+  its module, and breadcrumbs or Backspace go back up. The status bar shows the
+  layout stage with a cancel button.
 - *(planned)* Graph rendering: geometry is uploaded once into a few large GPU
   buffers (instanced quads for cells/pins, line segments for wires) whenever the
   graph or layout changes. Each frame draws them into an offscreen framebuffer

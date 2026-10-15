@@ -5,12 +5,14 @@
 #include "netviz/gui/console.h"
 #include "netviz/gui/design_panels.h"
 #include "netviz/gui/preferences.h"
+#include "netviz/gui/schematic.h"
 #include "netviz/gui/settings.h"
 #include "netviz/gui/window.h"
 #include "netviz/io/yosys_json.h"
 #include "netviz/view/camera.h"
 
 #include <future>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -62,6 +64,20 @@ class AppUi {
     void draw_about();
     void build_default_layout(unsigned int dockspace_id);
 
+    // Schematic of the selected module (see schematic.h).
+    void update_schematic();
+    void draw_canvas();
+    void draw_schematic_scene(ImDrawList* dl, ImVec2 origin);
+    void draw_canvas_overlay(ImVec2 origin);
+    void draw_node_tooltip(int64_t node);
+    void handle_canvas_events(const CanvasEvents& events);
+    // Display node of the selected cell or port, if it is in the shown schematic.
+    int64_t selected_node() const;
+    // Fits the view to the schematic, or resets it when nothing is drawn.
+    void fit_view();
+    // The view last used for the shown module, else a fit.
+    void restore_or_fit_view();
+
     Window* window_ = nullptr;
     float display_scale_ = 1.0f;
 
@@ -70,6 +86,15 @@ class AppUi {
     ConsolePanel console_;
     CommandRegistry commands_;
     DesignPanels design_;
+    SchematicView schematic_; // after design_: destroyed (and its job stopped) first
+    int64_t hovered_node_ = -1;
+    bool fit_pending_ = false; // fit once the canvas knows its size this frame
+    // Pan and zoom per module, restored when going back to it.
+    struct SavedView {
+        Vec2 center;
+        float zoom = 1.0f;
+    };
+    std::map<uint32_t, SavedView> module_views_; // by module index
 
     // Result of a background load, handed to the UI thread when ready.
     struct LoadedDesign {
