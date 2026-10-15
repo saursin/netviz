@@ -45,7 +45,8 @@ if(NETVIZ_BUILD_GUI)
         netviz/gui/preferences.cc
         netviz/gui/schematic.cc
         netviz/gui/schematic_canvas.cc
-        netviz/gui/settings_file.cc)
+        netviz/gui/settings_file.cc
+        netviz/gui/rules.cc)
     set(fonts ${PROJECT_SOURCE_DIR}/third_party)
     netviz_embed_file(netviz_gui ${fonts}/inter/Inter-Regular.ttf inter_ttf)
     netviz_embed_file(netviz_gui ${fonts}/jetbrains-mono/JetBrainsMono-Regular.ttf jetbrains_mono_ttf)

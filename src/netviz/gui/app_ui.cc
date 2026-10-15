@@ -874,6 +874,7 @@ void AppUi::draw() {
         open_file(*path);
     poll_loading();
     schematics_.set_max_nodes(settings_.max_schematic_nodes);
+    schematics_.set_rules(settings_.signal_rules, settings_.cell_rules);
     schematics_.poll();
     // Redraw 10 times a second while busy so the progress display moves.
     window_->set_idle_timeout_ms(loading_.valid() || schematics_.busy() ? 100 : 500);

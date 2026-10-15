@@ -1,5 +1,6 @@
 #pragma once
 
+#include "netviz/gui/rules.h"
 #include "netviz/layout/layered_layout.h"
 #include "netviz/view/spatial_grid.h"
 
@@ -27,10 +28,18 @@ struct Schematic {
     SpatialGrid grid;
     std::vector<uint32_t> net_begin; // nets of node v: node_nets[net_begin[v] .. net_begin[v+1])
     std::vector<uint32_t> node_nets;
-    std::vector<uint8_t> style;        // per node: its NodeStyle (colors), see schematic.cc
-    SpatialGrid wire_grid;             // over the bounding boxes of all wire segments
-    std::vector<uint32_t> segment_net; // per segment in wire_grid: its display net
-    std::vector<uint32_t> net_of_bit;  // per signal bit of the module: display net, or kNoNet
+    std::vector<uint8_t> style; // per node: its NodeStyle (colors), see schematic.cc
+    // Style rules as matched when built (copies; see rules.h).
+    std::vector<SignalRule> signal_rules;
+    std::vector<CellRule> cell_rules;
+    std::vector<uint16_t> net_rule;     // per display net: signal rule, or RuleMatches::kNone
+    std::vector<uint16_t> node_rule;    // per display node: cell rule, or RuleMatches::kNone
+    std::vector<std::string> net_label; // per display net: its name (shown for label nets)
+    std::vector<uint8_t> unrouted;      // per display net: drawn as labels, not wires
+    std::vector<uint32_t> pin_net;      // per display pin: its display net, or kNoNet
+    SpatialGrid wire_grid;              // over the bounding boxes of all wire segments
+    std::vector<uint32_t> segment_net;  // per segment in wire_grid: its display net
+    std::vector<uint32_t> net_of_bit;   // per signal bit of the module: display net, or kNoNet
     static constexpr uint32_t kNoNet = UINT32_MAX;
 
     bool too_large() const { return layout.status == LayoutResult::Status::TooLarge; }
@@ -94,6 +103,9 @@ class SchematicService {
     // Modules with more display nodes are not laid out (Status::TooLarge).
     // Changing the limit forgets earlier refusals, so they are checked again.
     void set_max_nodes(size_t max_nodes);
+    // Style rules for new schematics; changing them lays every module out
+    // again (label placement changes the layout).
+    void set_rules(const std::vector<SignalRule>& signals, const std::vector<CellRule>& cells);
 
     bool busy() const { return running_.has_value(); }
     std::optional<ModuleId> building() const { return running_; }
@@ -106,7 +118,9 @@ class SchematicService {
     };
 
     static std::unique_ptr<Schematic> build(const Design& design, ModuleId module,
-                                            const LayoutOptions& options, std::stop_token stop,
+                                            const LayoutOptions& options,
+                                            std::vector<SignalRule> signals,
+                                            std::vector<CellRule> cells, std::stop_token stop,
                                             LayoutProgress* progress);
     void start(ModuleId module);
     // Stops the job; a result it already finished goes into the cache.
@@ -129,6 +143,8 @@ class SchematicService {
     size_t cache_bytes_ = 0;
     uint64_t frame_ = 0;
     size_t max_nodes_ = LayoutOptions{}.max_nodes;
+    std::vector<SignalRule> signal_rules_;
+    std::vector<CellRule> cell_rules_;
 };
 
 } // namespace netviz

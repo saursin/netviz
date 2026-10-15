@@ -3,7 +3,7 @@
 #include "netviz/gui/window.h"
 
 #include <algorithm>
-#include <cctype>
+#include <cmath>
 #include <string_view>
 
 namespace netviz {
@@ -19,87 +19,45 @@ constexpr float kNameSize = 12.0f;         // node text height, world units
 constexpr float kPinTextSize = 10.0f;      // pin label height, world units
 constexpr float kTint = 0.18f;             // how much of its kind's color a cell box gets
 
-// What a node is, for its colors. Cells are grouped by their type name.
-enum NodeStyle : uint8_t {
-    Logic,
-    Sequential,
-    Mux,
-    Arithmetic,
-    OtherCell,
-    Instance,
-    InPort,
-    OutPort,
-    InOutPort,
-    kStyleCount
-};
+// What a node is, for its colors. Cells take their color from a cell rule
+// (rules.h), else the Cell color.
+enum NodeStyle : uint8_t { Cell, Instance, InPort, OutPort, InOutPort, kStyleCount };
 
 struct Colors {
-    ImU32 accent[kStyleCount]; // header band, port fill and border of each kind of node
+    ImU32 accent[kStyleCount]; // port fill and border of each kind of node
     ImU32 body, shadow, port_text, text, dim, wire, bus, highlight, selected, hovered;
 };
 
-const Colors kDark = {
-    {IM_COL32(32, 128, 128, 255), IM_COL32(128, 82, 184, 255), IM_COL32(184, 128, 32, 255),
-     IM_COL32(184, 70, 100, 255), IM_COL32(88, 100, 124, 255), IM_COL32(48, 104, 196, 255),
-     IM_COL32(40, 150, 90, 255), IM_COL32(204, 112, 40, 255), IM_COL32(150, 100, 190, 255)},
-    IM_COL32(38, 42, 52, 255),
-    IM_COL32(0, 0, 0, 90),
-    IM_COL32(255, 255, 255, 255),
-    IM_COL32(226, 229, 236, 255),
-    IM_COL32(150, 158, 172, 255),
-    IM_COL32(80, 196, 130, 255),
-    IM_COL32(100, 160, 255, 255),
-    IM_COL32(255, 200, 70, 255),
-    IM_COL32(255, 200, 70, 255),
-    IM_COL32(150, 205, 255, 255)};
-const Colors kLight = {
-    {IM_COL32(28, 140, 140, 255), IM_COL32(136, 86, 196, 255), IM_COL32(214, 146, 20, 255),
-     IM_COL32(206, 72, 106, 255), IM_COL32(104, 116, 140, 255), IM_COL32(52, 112, 210, 255),
-     IM_COL32(40, 160, 92, 255), IM_COL32(222, 118, 36, 255), IM_COL32(150, 100, 190, 255)},
-    IM_COL32(255, 255, 255, 255),
-    IM_COL32(0, 0, 0, 40),
-    IM_COL32(255, 255, 255, 255),
-    IM_COL32(30, 32, 40, 255),
-    IM_COL32(100, 106, 120, 255),
-    IM_COL32(30, 150, 90, 255),
-    IM_COL32(40, 100, 220, 255),
-    IM_COL32(230, 140, 0, 255),
-    IM_COL32(230, 140, 0, 255),
-    IM_COL32(40, 110, 220, 255)};
+const Colors kDark = {{IM_COL32(88, 100, 124, 255), IM_COL32(48, 104, 196, 255),
+                       IM_COL32(40, 150, 90, 255), IM_COL32(204, 112, 40, 255),
+                       IM_COL32(150, 100, 190, 255)},
+                      IM_COL32(38, 42, 52, 255),
+                      IM_COL32(0, 0, 0, 90),
+                      IM_COL32(255, 255, 255, 255),
+                      IM_COL32(226, 229, 236, 255),
+                      IM_COL32(150, 158, 172, 255),
+                      IM_COL32(80, 196, 130, 255),
+                      IM_COL32(100, 160, 255, 255),
+                      IM_COL32(255, 200, 70, 255),
+                      IM_COL32(255, 200, 70, 255),
+                      IM_COL32(150, 205, 255, 255)};
+const Colors kLight = {{IM_COL32(104, 116, 140, 255), IM_COL32(52, 112, 210, 255),
+                        IM_COL32(40, 160, 92, 255), IM_COL32(222, 118, 36, 255),
+                        IM_COL32(150, 100, 190, 255)},
+                       IM_COL32(255, 255, 255, 255),
+                       IM_COL32(0, 0, 0, 40),
+                       IM_COL32(255, 255, 255, 255),
+                       IM_COL32(30, 32, 40, 255),
+                       IM_COL32(100, 106, 120, 255),
+                       IM_COL32(30, 150, 90, 255),
+                       IM_COL32(40, 100, 220, 255),
+                       IM_COL32(230, 140, 0, 255),
+                       IM_COL32(230, 140, 0, 255),
+                       IM_COL32(40, 110, 220, 255)};
 
-bool contains_any(std::string_view s, std::initializer_list<std::string_view> parts) {
-    for (std::string_view p : parts)
-        if (s.find(p) != std::string_view::npos)
-            return true;
-    return false;
-}
+constexpr float kStub = 15.0f; // length of a label net's stub at each pin, world units
 
-// Guesses a cell's kind from its type name, e.g. "$_DFF_P_" or "NAND".
-NodeStyle cell_style(std::string_view type) {
-    std::string t;
-    for (char ch : type)
-        t += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-    std::string_view name = t;
-    name.remove_prefix(std::min(name.find_first_not_of("$_"), name.size()));
-    if (contains_any(name, {"dff", "latch", "flop"}))
-        return Sequential;
-    if (name.starts_with("mux") || name.starts_with("pmux") || name.starts_with("bmux") ||
-        name.starts_with("demux"))
-        return Mux;
-    static const std::initializer_list<std::string_view> arithmetic = {
-        "add",  "sub",  "mul",   "div", "mod", "neg", "alu", "lcu", "macc", "pow", "shl", "shr",
-        "sshl", "sshr", "shift", "lt",  "le",  "gt",  "ge",  "eq",  "ne",   "eqx", "nex"};
-    for (std::string_view op : arithmetic)
-        if (name == op ||
-            (name.starts_with(op) && name.size() > op.size() && name[op.size()] == '_'))
-            return Arithmetic;
-    if (contains_any(name,
-                     {"and", "or", "xor", "not", "buf", "inv", "aoi", "oai", "reduce", "logic"}))
-        return Logic;
-    return OtherCell;
-}
-
-NodeStyle node_style(const DisplayNode& node, const StringPool& names) {
+NodeStyle node_style(const DisplayNode& node) {
     switch (node.kind) {
     case NodeKind::Instance: return Instance;
     case NodeKind::InputPort: return InPort;
@@ -107,7 +65,41 @@ NodeStyle node_style(const DisplayNode& node, const StringPool& names) {
     case NodeKind::InOutPort: return InOutPort;
     case NodeKind::Cell: break;
     }
-    return cell_style(names.str(node.type));
+    return Cell;
+}
+
+ImU32 rgb(RuleColor c) {
+    return IM_COL32((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF, 255);
+}
+
+// A dashed line from a to b in screen space, drawn only inside `clip`. The
+// pattern starts at `a`, so it does not crawl when a long line is clipped.
+void dashed_line(ImDrawList* dl, ImVec2 a, ImVec2 b, ImU32 color, float thickness, float dash,
+                 float gap, const ImVec4& clip) {
+    float dx = b.x - a.x, dy = b.y - a.y;
+    float length = std::sqrt(dx * dx + dy * dy);
+    if (length <= 0.0f)
+        return;
+    float ux = dx / length, uy = dy / length;
+    float t0 = 0.0f, t1 = length;
+    auto narrow = [&](float p, float d, float lo, float hi) {
+        if (d == 0.0f) {
+            if (p < lo || p > hi)
+                t1 = -1.0f;
+            return;
+        }
+        float s0 = (lo - p) / d, s1 = (hi - p) / d;
+        t0 = std::max(t0, std::min(s0, s1));
+        t1 = std::min(t1, std::max(s0, s1));
+    };
+    narrow(a.x, ux, clip.x, clip.z);
+    narrow(a.y, uy, clip.y, clip.w);
+    float period = dash + gap;
+    for (float t = std::floor(t0 / period) * period; t < t1; t += period) {
+        float e = std::min(t + dash, length);
+        dl->AddLine(ImVec2(a.x + ux * t, a.y + uy * t), ImVec2(a.x + ux * e, a.y + uy * e), color,
+                    thickness);
+    }
 }
 
 // `a` blended toward `b` by t (0..1).
@@ -125,9 +117,12 @@ bool intersects(const Rect& a, const Rect& b) {
 } // namespace
 
 std::unique_ptr<Schematic> SchematicService::build(const Design& design, ModuleId module,
-                                                   const LayoutOptions& options,
+                                                   const LayoutOptions& layout_options,
+                                                   std::vector<SignalRule> signals,
+                                                   std::vector<CellRule> cells,
                                                    std::stop_token stop, LayoutProgress* progress) {
     auto built = std::make_unique<Schematic>();
+    LayoutOptions options = layout_options;
     built->module = module;
     // A display node per cell and port: refuse before building anything.
     const Module& m = design.module(module);
@@ -141,6 +136,19 @@ std::unique_ptr<Schematic> SchematicService::build(const Design& design, ModuleI
     built->graph = DisplayGraph::build(design, module);
     if (stop.stop_requested())
         return nullptr;
+    // Style rules; label nets are left out of the layout.
+    RuleMatches matches = match_rules(design, built->graph, signals, cells);
+    built->net_rule = std::move(matches.net_rule);
+    built->node_rule = std::move(matches.node_rule);
+    built->net_label = std::move(matches.net_name);
+    built->unrouted.assign(built->net_rule.size(), 0);
+    for (size_t n = 0; n < built->net_rule.size(); n++)
+        if (built->net_rule[n] != RuleMatches::kNone &&
+            signals[built->net_rule[n]].placement == NetPlacement::Label)
+            built->unrouted[n] = 1;
+    built->signal_rules = std::move(signals);
+    built->cell_rules = std::move(cells);
+    options.unrouted_nets = built->unrouted;
     built->layout = layered_layout(built->graph, design.names(), options, stop, progress);
     if (built->layout.status == LayoutResult::Status::Cancelled)
         return nullptr;
@@ -160,7 +168,14 @@ std::unique_ptr<Schematic> SchematicService::build(const Design& design, ModuleI
                     nets.push_back(n);
             }
     }
-    // Wire picking: a grid over segment boxes, and each bit's display net.
+    built->pin_net.assign(g.pins().size(), Schematic::kNoNet);
+    for (uint32_t n = 0; n < g.nets().size(); n++)
+        for (auto list : {g.drivers(g.nets()[n]), g.loads(g.nets()[n])})
+            for (DisplayPinId p : list)
+                built->pin_net[p.index] = n;
+
+    // Wire picking: a grid over segment boxes (and label stubs), and each
+    // bit's display net.
     std::vector<Rect> boxes;
     for (uint32_t n = 0; n < built->layout.nets.size(); n++)
         for (const Segment& seg : built->layout.nets[n].segments) {
@@ -168,6 +183,15 @@ std::unique_ptr<Schematic> SchematicService::build(const Design& design, ModuleI
                                  Vec2{std::max(seg.a.x, seg.b.x), std::max(seg.a.y, seg.b.y)}});
             built->segment_net.push_back(n);
         }
+    for (uint32_t p = 0; p < g.pins().size(); p++) {
+        uint32_t n = built->pin_net[p];
+        if (n == Schematic::kNoNet || !built->unrouted[n])
+            continue;
+        Vec2 at = built->layout.pins[p];
+        float x = g.pins()[p].side == PinSide::Left ? at.x - kStub : at.x + kStub;
+        boxes.push_back(Rect{Vec2{std::min(at.x, x), at.y}, Vec2{std::max(at.x, x), at.y}});
+        built->segment_net.push_back(n);
+    }
     built->wire_grid = SpatialGrid(boxes, kGridCell);
     built->net_of_bit.assign(m.signal_count(), Schematic::kNoNet);
     for (uint32_t n = 0; n < g.nets().size(); n++)
@@ -176,7 +200,7 @@ std::unique_ptr<Schematic> SchematicService::build(const Design& design, ModuleI
 
     built->style.reserve(g.nodes().size());
     for (const DisplayNode& node : g.nodes())
-        built->style.push_back(node_style(node, design.names()));
+        built->style.push_back(node_style(node));
     built->net_begin.push_back(0);
     for (const auto& nets : per_node) {
         built->node_nets.insert(built->node_nets.end(), nets.begin(), nets.end());
@@ -243,8 +267,10 @@ void SchematicService::start(ModuleId module) {
     const Design* design = design_;
     LayoutOptions options = kLayoutOptions;
     options.max_nodes = max_nodes_;
-    worker_ = std::jthread([this, design, module, options](std::stop_token stop) {
-        std::unique_ptr<Schematic> built = build(*design, module, options, stop, &progress_);
+    worker_ = std::jthread([this, design, module, options, signals = signal_rules_,
+                            cells = cell_rules_](std::stop_token stop) {
+        std::unique_ptr<Schematic> built =
+            build(*design, module, options, signals, cells, stop, &progress_);
         if (!built)
             return; // stopped
         {
@@ -352,6 +378,18 @@ void SchematicService::set_max_nodes(size_t max_nodes) {
     }
 }
 
+void SchematicService::set_rules(const std::vector<SignalRule>& signals,
+                                 const std::vector<CellRule>& cells) {
+    if (signals == signal_rules_ && cells == cell_rules_)
+        return;
+    signal_rules_ = signals;
+    cell_rules_ = cells;
+    stop_job();
+    queue_.clear();
+    cache_.clear();
+    cache_bytes_ = 0;
+}
+
 // Drops the least recently used schematics, except those shown in the last
 // few frames, until the cache fits its budget.
 void SchematicService::evict() {
@@ -425,20 +463,34 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
         if (net >= 0)
             highlight[net] = 1;
 
+    ImVec4 clip(dl->GetClipRectMin().x, dl->GetClipRectMin().y, dl->GetClipRectMax().x,
+                dl->GetClipRectMax().y);
+    auto rule_of_net = [&](uint32_t n) -> const SignalRule* {
+        return n < net_rule.size() && net_rule[n] != RuleMatches::kNone ? &signal_rules[net_rule[n]]
+                                                                        : nullptr;
+    };
+
     // Wires (unhighlighted first, so highlighted ones are drawn on top).
     for (int pass = 0; pass < 2; pass++) {
         for (size_t n = 0; n < layout.nets.size(); n++) {
-            if (highlight[n] != pass)
+            if (highlight[n] != pass || unrouted[n])
                 continue;
             const DisplayNet& net = g.nets()[n];
+            const SignalRule* rule = rule_of_net(static_cast<uint32_t>(n));
             bool bus = net.bit_count > 1;
-            ImU32 color = pass ? c.highlight : bus ? c.bus : c.wire;
-            float thickness = (bus ? 2.5f : 1.2f) * (pass ? 1.5f : 1.0f);
+            ImU32 color = pass ? c.highlight : rule ? rgb(rule->color) : bus ? c.bus : c.wire;
+            float thickness =
+                (bus ? 2.5f : 1.2f) * (rule ? rule->width : 1.0f) * (pass ? 1.5f : 1.0f);
+            bool dashed = rule && rule->line == LineStyle::Dashed;
             const NetRoute& route = layout.nets[n];
             for (const Segment& s : route.segments) {
                 Rect box{Vec2{std::min(s.a.x, s.b.x), std::min(s.a.y, s.b.y)},
                          Vec2{std::max(s.a.x, s.b.x), std::max(s.a.y, s.b.y)}};
-                if (intersects(box, visible))
+                if (!intersects(box, visible))
+                    continue;
+                if (dashed)
+                    dashed_line(dl, screen(s.a), screen(s.b), color, thickness, 6.0f, 4.0f, clip);
+                else
                     dl->AddLine(screen(s.a), screen(s.b), color, thickness);
             }
             float dot = std::clamp(3.0f * zoom, 2.0f, 5.0f);
@@ -460,23 +512,39 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
     float rounding = std::min(4.0f * zoom, 8.0f);
     float shadow = std::clamp(3.0f * zoom, 1.0f, 6.0f);
     float pad = 4.0f * zoom;
-    for (uint32_t v : grid.query(visible)) {
+    // Nodes near the view (label stubs and names reach a little outside them).
+    Rect around{Vec2{visible.min.x - 100.0f, visible.min.y},
+                Vec2{visible.max.x + 100.0f, visible.max.y}};
+    for (uint32_t v : grid.query(around)) {
         const DisplayNode& node = g.nodes()[v];
         const Rect& box = layout.nodes[v];
         ImVec2 a = screen(box.min);
         ImVec2 b = screen(box.max);
-        ImU32 accent = c.accent[style[v]];
+        const CellRule* crule = node.kind == NodeKind::Cell && node_rule[v] != RuleMatches::kNone
+                                    ? &cell_rules[node_rule[v]]
+                                    : nullptr;
+        ImU32 accent = crule ? rgb(crule->color) : c.accent[style[v]];
         bool cell = node.kind == NodeKind::Cell || node.kind == NodeKind::Instance;
         bool marked = v == selected || v == hovered;
         ImU32 border = v == selected ? c.selected : v == hovered ? c.hovered : accent;
-        float border_px = marked ? 2.5f : 1.2f;
+        float border_px = marked ? 2.5f : 1.2f * (crule ? crule->border_width : 1.0f);
+        BorderStyle border_style = marked || !crule ? BorderStyle::Solid : crule->border;
 
         if (cell) {
             // A box lightly tinted with its kind's color, outlined in it.
             dl->AddRectFilled(ImVec2(a.x + shadow, a.y + shadow),
                               ImVec2(b.x + shadow, b.y + shadow), c.shadow, rounding);
             dl->AddRectFilled(a, b, mix(c.body, accent, kTint), rounding);
-            dl->AddRect(a, b, border, rounding, border_px);
+            if (border_style == BorderStyle::Solid) {
+                dl->AddRect(a, b, border, rounding, border_px);
+            } else if (border_style != BorderStyle::None) {
+                float dash = border_style == BorderStyle::Dashed ? 6.0f : border_px;
+                float gap = border_style == BorderStyle::Dashed ? 4.0f : border_px * 2.0f;
+                ImVec2 corners[] = {a, ImVec2(b.x, a.y), b, ImVec2(a.x, b.y)};
+                for (int k = 0; k < 4; k++)
+                    dashed_line(dl, corners[k], corners[(k + 1) % 4], border, border_px, dash, gap,
+                                clip);
+            }
         } else {
             // Ports: an arrow pointing in the direction of signal flow.
             float tip = std::min((b.y - a.y) * 0.5f, b.x - a.x);
@@ -497,20 +565,42 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
                 dl->AddPolyline(pts, count, border, border_px, ImDrawFlags_Closed);
         }
 
-        // Pin markers, colored like the wire they connect to.
+        // Pin markers, colored like the wire they connect to; the clock ">"
+        // inside the box; and for label nets a stub with the net's name.
         std::span<const DisplayPin> pins = g.pins_of(node);
         float mark = std::clamp(2.0f * zoom, 1.0f, 3.5f);
-        if (cell && mark > 1.0f)
-            for (size_t i = 0; i < pins.size(); i++) {
-                ImVec2 p = screen(layout.pins[node.pins_begin + i]);
-                ImU32 color = pins[i].width > 1 ? c.bus : c.wire;
+        float clock = 5.0f * zoom; // size of the clock marker
+        for (size_t i = 0; i < pins.size(); i++) {
+            uint32_t pin = node.pins_begin + static_cast<uint32_t>(i);
+            uint32_t net = pin_net[pin];
+            const SignalRule* rule = net != kNoNet ? rule_of_net(net) : nullptr;
+            ImVec2 p = screen(layout.pins[pin]);
+            if (cell && mark > 1.0f) {
+                ImU32 color = rule ? rgb(rule->color) : pins[i].width > 1 ? c.bus : c.wire;
                 dl->AddRectFilled(ImVec2(p.x - mark, p.y - mark), ImVec2(p.x + mark, p.y + mark),
                                   color);
             }
+            if (cell && rule && rule->marker == PinMarker::Clock && pins[i].side == PinSide::Left &&
+                clock >= 2.0f)
+                dl->AddTriangle(ImVec2(p.x, p.y - clock), ImVec2(p.x + clock, p.y),
+                                ImVec2(p.x, p.y + clock), rgb(rule->color), 1.5f);
+            if (net != kNoNet && unrouted[net]) {
+                float dir = pins[i].side == PinSide::Left ? -1.0f : 1.0f;
+                ImU32 color = highlight[net] ? c.highlight : rule ? rgb(rule->color) : c.wire;
+                ImVec2 end(p.x + dir * kStub * zoom, p.y);
+                dl->AddLine(p, end, color, (rule ? rule->width : 1.0f) * 1.2f);
+                if (show_pins && !net_label[net].empty()) {
+                    const std::string& text = net_label[net];
+                    float w = font->CalcTextSizeA(pin_px, FLT_MAX, 0.0f, text.c_str()).x;
+                    float x = dir < 0.0f ? end.x - 3.0f - w : end.x + 3.0f;
+                    dl->AddText(font, pin_px, ImVec2(x, p.y - pin_px * 0.5f), color, text.c_str());
+                }
+            }
+        }
 
         if (!show_names)
             continue;
-        ImVec4 clip(a.x, a.y, b.x, b.y);
+        ImVec4 box_clip(a.x, a.y, b.x, b.y);
         auto line_y = [&](float line) { // top of text centered in text line `line`
             return a.y + (line * lh + (lh - kNameSize) * 0.5f) * zoom;
         };
@@ -518,19 +608,20 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
             auto centered = [&](const std::string& text, float line, ImU32 color) {
                 float w = font->CalcTextSizeA(name_px, FLT_MAX, 0.0f, text.c_str()).x;
                 dl->AddText(font, name_px, ImVec2((a.x + b.x - w) * 0.5f, line_y(line)), color,
-                            text.c_str(), nullptr, 0.0f, &clip);
+                            text.c_str(), nullptr, 0.0f, &box_clip);
             };
             float line = 0.0f;
             if (!node.hidden_name) {
                 centered(names.str(node.name), line, c.text);
                 line += 1.0f;
             }
-            centered(names.str(node.type), line, node.hidden_name ? c.text : c.dim);
+            if (!crule || crule->show_type || node.hidden_name)
+                centered(names.str(node.type), line, node.hidden_name ? c.text : c.dim);
         } else {
             const std::string& name = names.str(node.name);
             float y = (a.y + b.y - name_px) * 0.5f;
             dl->AddText(font, name_px, ImVec2(a.x + pad, y), c.port_text, name.c_str(), nullptr,
-                        0.0f, &clip);
+                        0.0f, &box_clip);
         }
 
         if (!show_pins || !cell)
@@ -540,11 +631,15 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
             ImVec2 p = screen(layout.pins[node.pins_begin + i]);
             float y = p.y - pin_px * 0.5f;
             float inset = pad + mark;
+            uint32_t net = pin_net[node.pins_begin + i];
+            const SignalRule* rule = net != kNoNet ? rule_of_net(net) : nullptr;
+            if (rule && rule->marker == PinMarker::Clock && pin.side == PinSide::Left)
+                inset += clock; // after the clock marker
             if (pin.name.valid()) {
                 const std::string& label = names.str(pin.name);
                 float w = font->CalcTextSizeA(pin_px, FLT_MAX, 0.0f, label.c_str()).x;
                 float x = pin.side == PinSide::Left ? p.x + inset : p.x - inset - w;
-                dl->AddText(font, pin_px, ImVec2(x, y), c.dim, label.c_str(), nullptr, 0.0f, &clip);
+                dl->AddText(font, pin_px, ImVec2(x, y), c.dim, label.c_str(), nullptr, 0.0f, &box_clip);
             }
             if (!pin.constant.empty()) { // constant inputs: value outside the box
                 float w = font->CalcTextSizeA(pin_px, FLT_MAX, 0.0f, pin.constant.c_str()).x;

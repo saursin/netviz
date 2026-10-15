@@ -1,6 +1,9 @@
 #pragma once
 
+#include "netviz/gui/rules.h"
+
 #include <cstdint>
+#include <vector>
 
 namespace netviz {
 
@@ -22,6 +25,10 @@ struct Settings {
     bool show_grid = true;
     bool show_perf_stats = false; // memory and UI time in the status bar
     bool console_wrap = false;    // wrap long console lines (toggle in the console)
+
+    // Schematic style rules (Preferences > Rules); see rules.h.
+    std::vector<SignalRule> signal_rules = default_signal_rules();
+    std::vector<CellRule> cell_rules = default_cell_rules();
 
     // Panel visibility
     bool show_hierarchy = true;

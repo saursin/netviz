@@ -26,25 +26,20 @@ waveforms and timing, and scriptable.
 - Schematic of the selected module (milestone 2a): display graph, grid-aligned
   layered layout in the background with cancel, culled drawing, picking,
   selection and navigation into instances ([LAYOUT.md](LAYOUT.md)).
+- Multiple canvases (dockable, with their own place and view), net selection,
+  and style rules for signals and cells (Preferences > Rules): matched by name,
+  attribute or cell pin, with color, width, dashes, the clock `>` marker and
+  label placement for signals, and color, border and labels for cells.
 
 ## Foundation milestones
 
 1. **Large modules (milestone 2b)**: level of detail by zoom, batched GPU
    drawing, and measuring and lifting the 50k-node layout guard.
 2. **Schematic usability**:
-   - **Multiple canvases**: each canvas a dockable window (tabs by default,
-     side by side when dragged) with its own place in the hierarchy and its
-     own pan/zoom; opened with middle-click or Ctrl+click on an instance or a
-     Hierarchy item, "Open in New Canvas" in context menus, or Ctrl+T. The
-     Hierarchy marks what is open in a canvas. Selection stays global; the
-     layout cache is shared.
-   - **Signal classes**: rules in Preferences (name, case-insensitive glob
-     patterns, color, pin marker, placement) with defaults for clocks
-     (`*clk*`, `*clock*`, and flip-flop clock pins by cell type) and resets
-     (`*rst*`, `*reset*`). Clock pins get the edge-triggered `>` marker.
-     Placement: routed normally, label only (a named stub instead of a wire;
-     hovering highlights every pin of the net), or on the top side of cells
-     (needs top pins in the layout).
+   - **More rule styles**: top-side placement for signal rules (pins on the
+     top edge of cells, which needs top pins in the layout); gate-shaped
+     symbols (AND/OR/NOT shapes) and hiding or collapsing cells (buffers,
+     tie cells) for cell rules.
    - **Layout preferences**: choice of layout engine and its options (grid,
      spacing, track pitch); the schematic cache key includes them.
    - **Faster routing**: flat arrays instead of tree maps in track planning

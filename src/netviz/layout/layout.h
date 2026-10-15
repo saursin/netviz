@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace netviz {
@@ -31,6 +32,10 @@ struct LayoutOptions {
     float node_gap = 20.0f;    // vertical space between nodes in a layer
     float channel_gap = 40.0f; // minimum horizontal space between layers
     float track_pitch = 10.0f; // spacing of parallel wire tracks
+    // Per display net, nonzero: the net is drawn as labels at its pins (e.g. a
+    // clock), so it is neither routed nor used to place nodes. Empty: route
+    // all. Must outlive the layout call.
+    std::span<const uint8_t> unrouted_nets;
     // Graphs with more display nodes are not laid out (status TooLarge).
     // A temporary guard until large-module work (see docs/LAYOUT.md).
     size_t max_nodes = 50000;

@@ -7,14 +7,16 @@ How netviz turns one module into a drawing. The code is in
 ## Pipeline
 
 ```
-Module (IR) --> DisplayGraph --> layered_layout() --> LayoutResult --> SchematicView (draw, pick)
+Module (IR) --> DisplayGraph --> layered_layout() --> LayoutResult --> Schematic (draw, pick)
                  view lib          layout lib          layout.h          gui lib
 ```
 
-`SchematicView` runs the first three steps on a `std::jthread` and hands the
-result to the UI thread under a mutex. Selecting another module, closing the
-design or pressing ✕ in the status bar requests stop through the
-`std::stop_token`; the layout checks it between stages and inside long loops.
+`SchematicService` runs the first three steps (plus rule matching) on a
+`std::jthread` and hands the resulting `Schematic` to the UI thread under a
+mutex, where canvases draw it. When no canvas wants the module any more (it
+navigated away, closed, or is hidden), or on ✕ in the status bar, it requests
+stop through the `std::stop_token`; the layout checks it between stages and
+inside long loops.
 
 ## Display graph
 
@@ -101,17 +103,33 @@ snaps to it.
 
 ## Drawing
 
-`SchematicView::draw` uses ImGui's draw list and only submits what is visible:
+`Schematic::draw` uses ImGui's draw list and only submits what is visible:
 nodes via the `SpatialGrid` (also used for picking), wire segments by their
 bounding box. Text is drawn only when it would be at least 6 px tall.
 
-- Cells have a header band colored by kind, guessed from the type name: logic
-  gates, flip-flops/latches, muxes, arithmetic/compare, others; submodule
-  instances are blue. Ports are arrows colored by direction.
-- Single-bit wires and buses have different colors; buses are thicker and
-  labeled with their width at the driver. Pins are marked in the color of
-  their wire.
-- Nets of the hovered and selected node are highlighted.
+- Style rules (Preferences > Rules, `gui/rules.h`) decide how signals and
+  cells look. Each is an ordered list where the first enabled match wins.
+  - **Signal rules** match a net by wire name or wire attribute, or by a cell
+    pin it connects to (cell type and pin name patterns). They set color,
+    width, solid or dashed line, the edge-triggered `>` marker at input pins,
+    and placement: routed, or label (no wire; a stub with the net's name at
+    each pin). Label nets are left out of the layout entirely
+    (`LayoutOptions::unrouted_nets`), so they neither add wires nor pull on
+    placement. Defaults: Clock (`*clk*`, `*clock*`, flip-flop clock pins) and
+    Reset (`*rst*`, `*reset*`, flip-flop reset pins).
+  - **Cell rules** match by cell type, instance name or attribute, and set the
+    color (box tint and border), border style and width, and whether the type
+    is shown. The defaults group flip-flops, muxes, arithmetic and logic
+    gates; submodule instances are blue and ports are arrows colored by
+    direction.
+  - Rules are copied into each schematic when it is built; changing them lays
+    out every module again.
+- Single-bit wires and buses (without a signal rule) have different colors;
+  buses are thicker and labeled with their width at the driver. Pins are
+  marked in the color of their wire.
+- Nets of the hovered and selected node, and the hovered and selected net,
+  are highlighted. Wires can be picked within a few pixels (a second spatial
+  grid over wire segments).
 
 ## Performance
 

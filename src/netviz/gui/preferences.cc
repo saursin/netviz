@@ -1,8 +1,11 @@
 #include "netviz/gui/preferences.h"
 
 #include <imgui.h>
+#include <imgui_internal.h> // GetActiveID
+#include <imgui_stdlib.h>
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <string>
 
@@ -22,6 +25,137 @@ void row_label(const char* label) {
     ImGui::SetNextItemWidth(-FLT_MIN);
 }
 
+// Lists in text form: comma-separated, spaces around items ignored.
+std::vector<std::string> split_list(const std::string& text) {
+    std::vector<std::string> items;
+    size_t start = 0;
+    while (start <= text.size()) {
+        size_t end = text.find(',', start);
+        if (end == std::string::npos)
+            end = text.size();
+        std::string item = text.substr(start, end - start);
+        size_t a = item.find_first_not_of(" \t"), b = item.find_last_not_of(" \t");
+        if (a != std::string::npos)
+            items.push_back(item.substr(a, b - a + 1));
+        start = end + 1;
+    }
+    return items;
+}
+
+std::string join_list(const std::vector<std::string>& items) {
+    std::string text;
+    for (size_t i = 0; i < items.size(); i++)
+        text += (i ? ", " : "") + items[i];
+    return text;
+}
+
+// "name=value" ("name" alone: any value).
+std::string attributes_text(const std::vector<AttributePattern>& attributes) {
+    std::vector<std::string> items;
+    for (const AttributePattern& a : attributes)
+        items.push_back(a.value == "*" ? a.name : a.name + "=" + a.value);
+    return join_list(items);
+}
+
+std::vector<AttributePattern> parse_attributes(const std::string& text) {
+    std::vector<AttributePattern> out;
+    for (const std::string& item : split_list(text)) {
+        size_t eq = item.find('=');
+        if (eq == std::string::npos)
+            out.push_back({item, "*"});
+        else
+            out.push_back({item.substr(0, eq), item.substr(eq + 1)});
+    }
+    return out;
+}
+
+// "cell:pin"
+std::string cell_pins_text(const std::vector<CellPinPattern>& pins) {
+    std::vector<std::string> items;
+    for (const CellPinPattern& p : pins)
+        items.push_back(p.cell + ":" + p.pin);
+    return join_list(items);
+}
+
+std::vector<CellPinPattern> parse_cell_pins(const std::string& text) {
+    std::vector<CellPinPattern> out;
+    for (const std::string& item : split_list(text)) {
+        size_t colon = item.rfind(':');
+        if (colon == std::string::npos)
+            out.push_back({"*", item});
+        else
+            out.push_back({item.substr(0, colon), item.substr(colon + 1)});
+    }
+    return out;
+}
+
+bool color_edit(const char* label, RuleColor& color) {
+    float rgb[3] = {((color >> 16) & 0xFF) / 255.0f, ((color >> 8) & 0xFF) / 255.0f,
+                    (color & 0xFF) / 255.0f};
+    if (!ImGui::ColorEdit3(label, rgb))
+        return false;
+    auto byte = [](float v) {
+        return static_cast<RuleColor>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
+    };
+    color = (byte(rgb[0]) << 16) | (byte(rgb[1]) << 8) | byte(rgb[2]);
+    return true;
+}
+
+ImVec4 color_vec(RuleColor c) {
+    return ImVec4(((c >> 16) & 0xFF) / 255.0f, ((c >> 8) & 0xFF) / 255.0f, (c & 0xFF) / 255.0f,
+                  1.0f);
+}
+
+// An ordered list of rules: enabled checkbox, color swatch and name per row,
+// and buttons to add, remove and reorder. `selected` is clamped to the list.
+template <typename Rule> void rule_list(const char* id, std::vector<Rule>& rules, int& selected) {
+    ImGui::PushID(id);
+    float rows = static_cast<float>(std::clamp<size_t>(rules.size(), 3, 6));
+    ImGui::BeginChild("list", ImVec2(0, ImGui::GetFrameHeightWithSpacing() * rows + 4.0f),
+                      ImGuiChildFlags_Borders);
+    for (int i = 0; i < static_cast<int>(rules.size()); i++) {
+        Rule& rule = rules[i];
+        ImGui::PushID(i);
+        ImGui::Checkbox("##on", &rule.enabled);
+        ImGui::SetItemTooltip("Enabled");
+        ImGui::SameLine();
+        ImGui::ColorButton("##color", color_vec(rule.color), ImGuiColorEditFlags_NoTooltip,
+                           ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight()));
+        ImGui::SameLine();
+        std::string label = rule.name.empty() ? "(unnamed)" : rule.name;
+        ImGui::AlignTextToFramePadding();
+        if (ImGui::Selectable(label.c_str(), selected == i))
+            selected = i;
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+    if (ImGui::Button("Add")) {
+        Rule rule;
+        rule.name = "New rule";
+        rules.push_back(rule);
+        selected = static_cast<int>(rules.size()) - 1;
+    }
+    ImGui::SameLine();
+    bool valid = selected >= 0 && selected < static_cast<int>(rules.size());
+    ImGui::BeginDisabled(!valid);
+    if (ImGui::Button("Remove") && valid)
+        rules.erase(rules.begin() + selected);
+    ImGui::SameLine();
+    if (ImGui::Button("Up") && valid && selected > 0) {
+        std::swap(rules[selected], rules[selected - 1]);
+        selected--;
+    }
+    ImGui::SetItemTooltip("Earlier rules win");
+    ImGui::SameLine();
+    if (ImGui::Button("Down") && valid && selected + 1 < static_cast<int>(rules.size())) {
+        std::swap(rules[selected], rules[selected + 1]);
+        selected++;
+    }
+    ImGui::EndDisabled();
+    selected = std::clamp(selected, 0, std::max(0, static_cast<int>(rules.size()) - 1));
+    ImGui::PopID();
+}
+
 bool begin_rows(const char* id) {
     if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp))
         return false;
@@ -38,11 +172,14 @@ void PreferencesWindow::copy_config(const Settings& from, Settings& to) {
     to.min_zoom = from.min_zoom;
     to.max_zoom = from.max_zoom;
     to.max_schematic_nodes = from.max_schematic_nodes;
+    to.signal_rules = from.signal_rules;
+    to.cell_rules = from.cell_rules;
 }
 
 bool PreferencesWindow::same_config(const Settings& a, const Settings& b) {
     return a.theme == b.theme && a.ui_scale == b.ui_scale && a.min_zoom == b.min_zoom &&
-           a.max_zoom == b.max_zoom && a.max_schematic_nodes == b.max_schematic_nodes;
+           a.max_zoom == b.max_zoom && a.max_schematic_nodes == b.max_schematic_nodes &&
+           a.signal_rules == b.signal_rules && a.cell_rules == b.cell_rules;
 }
 
 void PreferencesWindow::draw(Settings& settings) {
@@ -52,7 +189,7 @@ void PreferencesWindow::draw(Settings& settings) {
         copy_config(settings, draft_);
         just_opened_ = false;
     }
-    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 36, ImGui::GetFontSize() * 20),
+    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 40, ImGui::GetFontSize() * 34),
                              ImGuiCond_FirstUseEver);
     bool visible = ImGui::Begin(kWindowName, &open_, ImGuiWindowFlags_NoDocking);
     if (!open_ || !visible) { // closed with the window's x: same as Cancel
@@ -67,7 +204,9 @@ void PreferencesWindow::draw(Settings& settings) {
     struct {
         const char* name;
         Section section;
-    } sections[] = {{"Appearance", Section::Appearance}, {"Canvas", Section::Canvas}};
+    } sections[] = {{"Appearance", Section::Appearance},
+                    {"Canvas", Section::Canvas},
+                    {"Rules", Section::Rules}};
     for (const auto& s : sections) {
         if (ImGui::Selectable(s.name, section_ == s.section))
             section_ = s.section;
@@ -77,10 +216,11 @@ void PreferencesWindow::draw(Settings& settings) {
 
     // Right: the selected section's settings (edits the draft).
     ImGui::BeginChild("settings", ImVec2(0, -footer));
-    if (section_ == Section::Appearance)
-        draw_appearance(draft_);
-    else
-        draw_canvas(draft_);
+    switch (section_) {
+    case Section::Appearance: draw_appearance(draft_); break;
+    case Section::Canvas: draw_canvas(draft_); break;
+    case Section::Rules: draw_rules(draft_); break;
+    }
     ImGui::EndChild();
 
     // Footer: Reset on the left; OK, Cancel, Apply on the right.
@@ -89,10 +229,13 @@ void PreferencesWindow::draw(Settings& settings) {
         if (section_ == Section::Appearance) {
             draft_.theme = defaults.theme;
             draft_.ui_scale = defaults.ui_scale;
-        } else {
+        } else if (section_ == Section::Canvas) {
             draft_.min_zoom = defaults.min_zoom;
             draft_.max_zoom = defaults.max_zoom;
             draft_.max_schematic_nodes = defaults.max_schematic_nodes;
+        } else {
+            draft_.signal_rules = defaults.signal_rules;
+            draft_.cell_rules = defaults.cell_rules;
         }
     }
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -171,6 +314,107 @@ void PreferencesWindow::draw_canvas(Settings& settings) {
                           "Large schematics take a while to lay out and are slow to pan\n"
                           "and zoom when zoomed out (1,000 - 10,000,000)");
     ImGui::EndTable();
+}
+
+bool PreferencesWindow::list_field(const char* label, const std::string& formatted,
+                                   std::string& out) {
+    ImGuiID id = ImGui::GetID(label);
+    std::string& text = texts_[id];
+    if (ImGui::GetActiveID() != id)
+        text = formatted;
+    if (!ImGui::InputText(label, &text))
+        return false;
+    out = text;
+    return true;
+}
+
+void PreferencesWindow::draw_rules(Settings& settings) {
+    ImGui::TextWrapped("Rules style the schematic. The first enabled rule that matches wins. "
+                       "Patterns are case-insensitive, with * and ?; separate several with "
+                       "commas. Attributes are name=value (or just name for any value).");
+
+    ImGui::SeparatorText("Signals");
+    rule_list("signals", settings.signal_rules, signal_selected_);
+    if (!settings.signal_rules.empty())
+        draw_signal_rule(settings.signal_rules[signal_selected_]);
+
+    ImGui::SeparatorText("Cells");
+    rule_list("cells", settings.cell_rules, cell_selected_);
+    if (!settings.cell_rules.empty())
+        draw_cell_rule(settings.cell_rules[cell_selected_]);
+}
+
+void PreferencesWindow::draw_signal_rule(SignalRule& rule) {
+    ImGui::PushID("signal_rule");
+    if (begin_rows("signal_rule")) {
+        std::string text;
+        row_label("Name");
+        ImGui::InputText("##name", &rule.name);
+        row_label("Net names");
+        if (list_field("##nets", join_list(rule.nets), text))
+            rule.nets = split_list(text);
+        ImGui::SetItemTooltip("Names of wires on the net, e.g. *clk*, *clock*");
+        row_label("Attributes");
+        if (list_field("##attrs", attributes_text(rule.attributes), text))
+            rule.attributes = parse_attributes(text);
+        ImGui::SetItemTooltip("Attributes of wires on the net, e.g. keep=1, clock_*");
+        row_label("Cell pins");
+        if (list_field("##pins", cell_pins_text(rule.cell_pins), text))
+            rule.cell_pins = parse_cell_pins(text);
+        ImGui::SetItemTooltip("Nets connected to these pins, as cell type:pin name,\n"
+                              "e.g. *dff*:CLK, $_DFF_*:C");
+        row_label("Color");
+        color_edit("##color", rule.color);
+        row_label("Width");
+        ImGui::SliderFloat("##width", &rule.width, 0.5f, 4.0f, "%.1fx");
+        row_label("Line");
+        int line = static_cast<int>(rule.line);
+        if (ImGui::Combo("##line", &line, "Solid\0Dashed\0"))
+            rule.line = static_cast<LineStyle>(line);
+        row_label("Pin marker");
+        int marker = static_cast<int>(rule.marker);
+        if (ImGui::Combo("##marker", &marker, "None\0Clock (>)\0"))
+            rule.marker = static_cast<PinMarker>(marker);
+        row_label("Placement");
+        int placement = static_cast<int>(rule.placement);
+        if (ImGui::Combo("##placement", &placement, "Routed\0Label\0"))
+            rule.placement = static_cast<NetPlacement>(placement);
+        ImGui::SetItemTooltip("Label: no wire, the net's name at each pin instead\n"
+                              "(for nets that go everywhere, like clocks)");
+        ImGui::EndTable();
+    }
+    ImGui::PopID();
+}
+
+void PreferencesWindow::draw_cell_rule(CellRule& rule) {
+    ImGui::PushID("cell_rule");
+    if (begin_rows("cell_rule")) {
+        std::string text;
+        row_label("Name");
+        ImGui::InputText("##name", &rule.name);
+        row_label("Cell types");
+        if (list_field("##types", join_list(rule.types), text))
+            rule.types = split_list(text);
+        ImGui::SetItemTooltip("e.g. *dff*, $_DFF_*, sky130_fd_sc_hd__*");
+        row_label("Instance names");
+        if (list_field("##names", join_list(rule.names), text))
+            rule.names = split_list(text);
+        row_label("Attributes");
+        if (list_field("##attrs", attributes_text(rule.attributes), text))
+            rule.attributes = parse_attributes(text);
+        row_label("Color");
+        color_edit("##color", rule.color);
+        row_label("Border");
+        int border = static_cast<int>(rule.border);
+        if (ImGui::Combo("##border", &border, "Solid\0Dashed\0Dotted\0None\0"))
+            rule.border = static_cast<BorderStyle>(border);
+        row_label("Border width");
+        ImGui::SliderFloat("##border_width", &rule.border_width, 0.5f, 4.0f, "%.1fx");
+        row_label("Show type");
+        ImGui::Checkbox("##show_type", &rule.show_type);
+        ImGui::EndTable();
+    }
+    ImGui::PopID();
 }
 
 } // namespace netviz

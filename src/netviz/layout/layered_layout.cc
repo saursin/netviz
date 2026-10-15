@@ -175,9 +175,17 @@ class LayeredLayout {
 
     // -- 2. edges between real nodes --------------------------------------------
 
+    bool unrouted(uint32_t net) const {
+        return net < o_.unrouted_nets.size() && o_.unrouted_nets[net] != 0;
+    }
+
     void build_edges() {
         uint32_t i = 0;
         for (const DisplayNet& net : g_.nets()) {
+            if (unrouted(i)) {
+                i++;
+                continue;
+            }
             tick(i++);
             for (DisplayPinId d : g_.drivers(net))
                 for (DisplayPinId l : g_.loads(net)) {
@@ -355,6 +363,8 @@ class LayeredLayout {
     void add_dummies() {
         for (uint32_t net = 0; net < g_.nets().size(); net++) {
             tick(net);
+            if (unrouted(net))
+                continue;
             const DisplayNet& dn = g_.nets()[net];
             for (DisplayPinId d : g_.drivers(dn)) {
                 Chain chain{net, d.index, rank_[node_of_pin(d.index)], {}};

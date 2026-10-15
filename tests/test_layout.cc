@@ -59,7 +59,8 @@ bool look_connected(const Segment& a, const Segment& b) {
 
 // Properties every layout must have (no exact coordinates, so the algorithm
 // can improve without rewriting tests).
-void check_invariants(const DisplayGraph& g, const LayoutResult& r) {
+void check_invariants(const DisplayGraph& g, const LayoutResult& r,
+                      std::span<const uint8_t> r_unrouted = {}) {
     REQUIRE(r.status == LayoutResult::Status::Ok);
     REQUIRE(r.nodes.size() == g.nodes().size());
     REQUIRE(r.pins.size() == g.pins().size());
@@ -164,7 +165,7 @@ void check_invariants(const DisplayGraph& g, const LayoutResult& r) {
             CHECK(finite(s.b));
             CHECK((std::abs(s.a.x - s.b.x) < kEps || std::abs(s.a.y - s.b.y) < kEps));
         }
-        if (net.driver_count == 0)
+        if (net.driver_count == 0 || (n < r_unrouted.size() && r_unrouted[n]))
             continue;
         for (DisplayPinId load : g.loads(net)) {
             if (g.pin(load).node == g.pin(g.drivers(net)[0]).node)
@@ -268,4 +269,26 @@ TEST_CASE("layout: too-large graphs and cancellation") {
     stop.request_stop();
     CHECK(layered_layout(g, d.names(), {}, stop.get_token()).status ==
           LayoutResult::Status::Cancelled);
+}
+
+TEST_CASE("layout: unrouted nets get no wires and do not break the layout") {
+    ImportResult imported = import_yosys_json(std::filesystem::path(NETVIZ_EXAMPLES_DIR) /
+                                              "03_regfile" / "regfile.json");
+    REQUIRE(imported.design);
+    const Design& d = *imported.design;
+    ModuleId id = *d.top();
+    DisplayGraph g = DisplayGraph::build(d, id);
+    // Leave every other net unrouted.
+    std::vector<uint8_t> unrouted(g.nets().size(), 0);
+    for (size_t n = 0; n < unrouted.size(); n += 2)
+        unrouted[n] = 1;
+    LayoutOptions options;
+    options.unrouted_nets = unrouted;
+    LayoutResult r = layered_layout(g, d.names(), options);
+    check_invariants(g, r, unrouted);
+    for (size_t n = 0; n < unrouted.size(); n++)
+        if (unrouted[n]) {
+            CHECK(r.nets[n].segments.empty());
+            CHECK(r.nets[n].junctions.empty());
+        }
 }
