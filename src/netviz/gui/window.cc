@@ -9,7 +9,9 @@
 #include <imgui_impl_sdl3.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <string_view>
+#include <system_error>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -25,6 +27,52 @@
 #endif
 
 namespace netviz {
+
+namespace {
+
+std::filesystem::path sdl_pref_dir() {
+    std::filesystem::path dir;
+    if (char* pref = SDL_GetPrefPath("netviz", "netviz")) {
+        dir = pref;
+        SDL_free(pref);
+    }
+    return dir;
+}
+
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+// An XDG base directory: $var if set to an absolute path, else ~/fallback.
+std::filesystem::path xdg_dir(const char* var, const char* fallback) {
+    const char* value = std::getenv(var);
+    if (value && value[0] == '/')
+        return value;
+    const char* home = std::getenv("HOME");
+    return std::filesystem::path(home ? home : ".") / fallback;
+}
+#endif
+
+AppPaths find_app_paths(std::filesystem::path chosen) {
+    AppPaths paths;
+    if (chosen.empty())
+        if (const char* env = std::getenv("NETVIZ_CONFIG_DIR"); env && env[0] != '\0')
+            chosen = env;
+    if (!chosen.empty()) {
+        paths.settings = chosen / "settings.json";
+        paths.layout = chosen / "layout.ini";
+        return paths; // nothing to migrate into a folder the user chose
+    }
+    std::filesystem::path pref = sdl_pref_dir(); // older versions kept imgui.ini here
+    paths.legacy_ini = pref / "imgui.ini";
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    paths.settings = xdg_dir("XDG_CONFIG_HOME", ".config") / "netviz" / "settings.json";
+    paths.layout = xdg_dir("XDG_STATE_HOME", ".local/state") / "netviz" / "layout.ini";
+#else
+    paths.settings = pref / "settings.json";
+    paths.layout = pref / "layout.ini";
+#endif
+    return paths;
+}
+
+} // namespace
 
 namespace {
 
@@ -83,12 +131,17 @@ bool Window::init(const WindowConfig& config) {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    // Keep imgui.ini in the per-user config dir instead of the working directory.
-    if (char* pref = SDL_GetPrefPath("netviz", "netviz")) {
-        ini_path_ = std::string(pref) + "imgui.ini";
-        SDL_free(pref);
-        io.IniFilename = ini_path_.c_str();
+    paths_ = find_app_paths(config.config_dir);
+    // Start the layout from an older version's imgui.ini, if there is one.
+    std::error_code ec;
+    if (!std::filesystem::exists(paths_.layout, ec) &&
+        std::filesystem::exists(paths_.legacy_ini, ec)) {
+        std::filesystem::create_directories(paths_.layout.parent_path(), ec);
+        std::filesystem::copy_file(paths_.legacy_ini, paths_.layout, ec);
     }
+    std::filesystem::create_directories(paths_.layout.parent_path(), ec);
+    ini_path_ = paths_.layout.string();
+    io.IniFilename = ini_path_.c_str();
 
     display_scale_ = scale;
     const char* driver = SDL_GetCurrentVideoDriver();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -11,10 +12,23 @@ struct SDL_GLContextState;
 
 namespace netviz {
 
+// Where netviz keeps its per-user files. Both in the folder given by
+// --config-dir or $NETVIZ_CONFIG_DIR if set; otherwise on Linux and BSD
+// settings in $XDG_CONFIG_HOME/netviz (~/.config/netviz) and state in
+// $XDG_STATE_HOME/netviz (~/.local/state/netviz), elsewhere both in SDL's
+// per-user folder.
+struct AppPaths {
+    std::filesystem::path settings;   // settings.json: preferences
+    std::filesystem::path layout;     // layout.ini: window/dock layout, panels, recent files
+    std::filesystem::path legacy_ini; // imgui.ini of older versions (read once to migrate;
+                                      // empty with a chosen folder)
+};
+
 struct WindowConfig {
     std::string title = "netviz";
     int width = 1280;
     int height = 800;
+    std::filesystem::path config_dir; // see AppPaths; empty: $NETVIZ_CONFIG_DIR or the default
 };
 
 // Owns the OS window, the OpenGL context and the ImGui context/backends.
@@ -44,6 +58,8 @@ class Window {
 
     void begin_frame();
     void end_frame();
+
+    const AppPaths& paths() const { return paths_; }
 
     // Display content scale (e.g. 2.0 on a 200% HiDPI monitor).
     float display_scale() const { return display_scale_; }
@@ -87,7 +103,8 @@ class Window {
     float pinch_zoom_ = 1.0f;      // pinch factor accumulated since last take
     float pinch_last_ = 1.0f;      // last cumulative scale of the current gesture
     bool pinch_cumulative_ = true; // see handle_event()
-    std::string ini_path_;
+    AppPaths paths_;
+    std::string ini_path_; // paths_.layout, kept alive for ImGui
 
     // Filled by the file dialog callback, which may run on another thread.
     std::mutex opened_mutex_;

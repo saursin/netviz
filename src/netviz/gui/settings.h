@@ -6,7 +6,8 @@ namespace netviz {
 
 enum class Theme { Dark, Light };
 
-// User preferences and panel visibility. Saved to imgui.ini, restored on start.
+// User preferences (saved in settings.json, see settings_file.h) and panel
+// visibility (saved with the window layout in layout.ini).
 struct Settings {
     // Configuration (Preferences window)
     Theme theme = Theme::Dark;

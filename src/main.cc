@@ -17,6 +17,8 @@ options:
   -h, --help               show this help and exit
   -V, --version            show the version and exit
   --log-level <level>      debug, info, warn or error (default: info)
+  --config-dir <dir>       keep settings.json and layout.ini in <dir>
+                           (default: $NETVIZ_CONFIG_DIR, else the per-user folders)
 )";
 
 void log_banner() {
@@ -28,6 +30,7 @@ void log_banner() {
 
 struct Options {
     std::string file;
+    std::string config_dir;
     netviz::LogLevel log_level = netviz::LogLevel::Info;
 };
 
@@ -59,6 +62,15 @@ std::optional<Options> parse_args(int argc, char** argv, int& exit_code) {
             options.log_level = *level;
             continue;
         }
+        if (arg == "--config-dir") {
+            if (i + 1 >= argc) {
+                std::fputs("netviz: --config-dir needs a directory\n", stderr);
+                exit_code = 2;
+                return std::nullopt;
+            }
+            options.config_dir = argv[++i];
+            continue;
+        }
         if (arg.starts_with("-") || !options.file.empty()) {
             std::fprintf(stderr, "netviz: unexpected argument '%s'\n\n%s", argv[i], kUsage);
             exit_code = 2;
@@ -84,7 +96,9 @@ int main(int argc, char** argv) {
     log_banner();
 
     netviz::Window window;
-    if (!window.init(netviz::WindowConfig{}))
+    netviz::WindowConfig config;
+    config.config_dir = options->config_dir;
+    if (!window.init(config))
         return 1;
     ui.init(window);
 

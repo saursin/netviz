@@ -42,9 +42,14 @@ class AppUi {
   private:
     void load_fonts();
     void apply_style();
-    void register_settings_handler();
-    void read_setting(const std::string& key, const std::string& value);
-    std::string write_settings() const;
+    // Preferences live in settings.json (settings_file.h); session state
+    // (panel visibility, recent files) in a "[Netviz][State]" section of
+    // ImGui's layout.ini, next to the window layout.
+    void load_settings();
+    void save_settings();
+    void register_state_handler();
+    void read_state(const std::string& key, const std::string& value);
+    std::string write_state() const;
     void register_commands();
 
     void start_loading(const std::string& path);
@@ -96,13 +101,15 @@ class AppUi {
     std::shared_ptr<ImportProgress> load_progress_; // shared with the loading thread
     std::string last_file_; // last file loaded or attempted; what reload() reads
     std::string pending_open_;
-    std::vector<std::string> recent_files_; // newest first, absolute paths; saved in imgui.ini
+    std::vector<std::string> recent_files_; // newest first, absolute paths; saved in layout.ini
     uint64_t memory_before_load_ = 0; // process memory when the last load started // file waiting
                                       // for "close the current design?"
 
     PreferencesWindow preferences_;
     Settings settings_;
-    Settings saved_settings_; // last state written to imgui.ini
+    Settings saved_settings_;      // last state handed to ImGui's layout.ini
+    Settings file_settings_;       // last preferences written to settings.json
+    bool settings_file_ok_ = true; // false: unreadable, so it is not overwritten
     bool style_dirty_ = false;
     Theme applied_theme_ = Theme::Dark; // style currently applied, see apply_style()
     float applied_ui_scale_ = 1.0f;

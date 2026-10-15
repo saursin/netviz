@@ -92,9 +92,14 @@ Described in [LAYOUT.md](LAYOUT.md).
   does not provide: the native file dialog and touchpad pinch gestures.
 - `AppUi` owns the panels, the toolbar and status bar, the dock layout (design
   sidebar left, properties right, console under the canvas), fonts, theme and
-  the user's `Settings`. Settings are stored in `imgui.ini` through an ImGui
-  settings handler, next to the window layout. Panels are plain classes or
-  methods with a `draw()`.
+  the user's `Settings`. Preferences are stored in `settings.json` (in
+  `$XDG_CONFIG_HOME/netviz` on Linux; `settings_file.h`, tested without the
+  GUI); window and dock layout, panel visibility and recent files in
+  `layout.ini` (in `$XDG_STATE_HOME/netviz`), written by ImGui with a small
+  netviz section. Other platforms use SDL's per-user folder for both. On
+  first start, preferences from an older version's `imgui.ini` are moved
+  over; an unreadable `settings.json` is reported and not overwritten. Panels
+  are plain classes or methods with a `draw()`.
 - **Loading** runs in the background: `AppUi::open_file` imports the file with
   `std::async`, the worker wakes the event loop (`Window::post_wake`) when done,
   and the UI thread installs the design on its next frame. The UI never sees a

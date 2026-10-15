@@ -1,9 +1,11 @@
 #include "netviz/gui/design_panels.h"
 
 #include "netviz/gui/fonts.h"
+#include "netviz/gui/icons.h"
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <format>
 
 namespace netviz {
@@ -162,20 +164,23 @@ void DesignPanels::draw_open_mark(const std::vector<CellId>& path, ModuleId modu
         }
     if (!shown)
         return;
+    // At the right edge of the row, sized like a text item so it lines up
+    // with the label; the icon is centered on what is visibly drawn.
+    ImVec2 size(ImGui::CalcTextSize(icons::kShown).x + 4.0f, ImGui::GetTextLineHeight());
     ImGui::SameLine();
-    ImGui::PushID("shown");
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.0f, 0.0f));
-    if (ImGui::SmallButton(icons::kShown))
+    float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - size.x;
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right));
+    if (ImGui::InvisibleButton("shown", size))
         ImGui::SetWindowFocus(shown->window.c_str());
-    ImGui::PopStyleVar();
-    ImGui::PopStyleColor(2);
+    ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+    ImU32 color =
+        ImGui::GetColorU32(ImGui::IsItemHovered() ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    draw_icon(ImGui::GetWindowDrawList(), icons::kShown,
+              ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f), color);
     if (count > 1)
         ImGui::SetItemTooltip("Shown in %d canvases; click to bring one to the front", count);
     else
         ImGui::SetItemTooltip("Shown in a canvas; click to bring it to the front");
-    ImGui::PopID();
 }
 
 // -- Design (hierarchy) panel ------------------------------------------------

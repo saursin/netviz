@@ -41,14 +41,17 @@ if(NETVIZ_BUILD_GUI)
         netviz/gui/canvas.cc
         netviz/gui/console.cc
         netviz/gui/design_panels.cc
+        netviz/gui/icons.cc
         netviz/gui/preferences.cc
         netviz/gui/schematic.cc
-        netviz/gui/schematic_canvas.cc)
+        netviz/gui/schematic_canvas.cc
+        netviz/gui/settings_file.cc)
     set(fonts ${PROJECT_SOURCE_DIR}/third_party)
     netviz_embed_file(netviz_gui ${fonts}/inter/Inter-Regular.ttf inter_ttf)
     netviz_embed_file(netviz_gui ${fonts}/jetbrains-mono/JetBrainsMono-Regular.ttf jetbrains_mono_ttf)
     netviz_embed_file(netviz_gui ${fonts}/lucide/lucide.ttf lucide_ttf)
     target_link_libraries(netviz_gui PUBLIC netviz_layout netviz_io imgui)
+    target_link_libraries(netviz_gui PRIVATE simdjson::simdjson) # settings.json
     if(WIN32)
         target_link_libraries(netviz_gui PRIVATE psapi) # GetProcessMemoryInfo
     endif()

@@ -127,7 +127,7 @@ Release build, synthetic modules from `ex/scale/gen_netlist.py`:
 - **Size limit**: modules with more display nodes (cells and ports) than
   `LayoutOptions::max_nodes` are not laid out; the canvas says so. The GUI sets
   it from Settings > Preferences > Canvas > Largest schematic (default 50,000,
-  saved in `imgui.ini`); raising it lays out a refused module again. It exists
+  saved in `settings.json`); raising it lays out a refused module again. It exists
   because drawing is not yet level-of-detail aware, so big schematics are slow
   to pan and zoom when zoomed out. Big designs are meant to be explored via the
   hierarchy now, and via cones and filtering later.

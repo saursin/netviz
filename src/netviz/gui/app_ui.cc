@@ -2,6 +2,8 @@
 
 #include "netviz/core/log.h"
 #include "netviz/gui/fonts.h"
+#include "netviz/gui/icons.h"
+#include "netviz/gui/settings_file.h"
 #include "netviz/gui/window.h"
 
 #include <imgui.h>
@@ -27,94 +29,6 @@ constexpr float kMinUiScale = 0.5f;
 constexpr float kMaxUiScale = 3.0f;
 constexpr size_t kMaxDumpLines = 5000;  // larger modules are not dumped to the console
 constexpr size_t kMaxIssuesLogged = 50; // issues listed in the log after loading
-
-// Visible (inked) bounds of an icon glyph at the current font and size,
-// relative to the text position. ImGui's glyph box is not enough: for Lucide
-// icons it includes empty rows below the drawing, which makes icons sit high
-// when centered on it. The bounds are measured once from the font texture
-// and cached.
-struct InkBox {
-    float x0, y0, x1, y1;
-};
-
-InkBox icon_ink(const char* icon) {
-    unsigned int codepoint = 0;
-    ImTextCharFromUtf8(&codepoint, icon, nullptr);
-    float size = ImGui::GetFontSize();
-    static std::map<std::tuple<const ImFont*, float, unsigned int>, InkBox> cache;
-    auto key = std::make_tuple(ImGui::GetFont(), size, codepoint);
-    if (auto it = cache.find(key); it != cache.end())
-        return it->second;
-
-    const ImFontGlyph* g = ImGui::GetFontBaked()->FindGlyph(static_cast<ImWchar>(codepoint));
-    InkBox box{g->X0, g->Y0, g->X1, g->Y1};
-    ImTextureData* tex = ImGui::GetIO().Fonts->TexData;
-    if (g->Visible && tex && tex->Pixels) {
-        int u0 = static_cast<int>(g->U0 * tex->Width + 0.5f);
-        int v0 = static_cast<int>(g->V0 * tex->Height + 0.5f);
-        int u1 = static_cast<int>(g->U1 * tex->Width + 0.5f);
-        int v1 = static_cast<int>(g->V1 * tex->Height + 0.5f);
-        int left = u1, right = u0 - 1, top = v1, bottom = v0 - 1;
-        for (int y = v0; y < v1; y++) {
-            for (int x = u0; x < u1; x++) {
-                auto* px = static_cast<const unsigned char*>(tex->GetPixelsAt(x, y));
-                int alpha = tex->Format == ImTextureFormat_RGBA32 ? px[3] : px[0];
-                if (alpha > 32) {
-                    left = std::min(left, x);
-                    right = std::max(right, x);
-                    top = std::min(top, y);
-                    bottom = std::max(bottom, y);
-                }
-            }
-        }
-        if (right >= left && u1 > u0 && v1 > v0) {
-            float sx = (g->X1 - g->X0) / static_cast<float>(u1 - u0);
-            float sy = (g->Y1 - g->Y0) / static_cast<float>(v1 - v0);
-            box = {g->X0 + (left - u0) * sx, g->Y0 + (top - v0) * sy, g->X0 + (right + 1 - u0) * sx,
-                   g->Y0 + (bottom + 1 - v0) * sy};
-        }
-    }
-    cache[key] = box;
-    return box;
-}
-
-// Draws an icon with its visible bounds centered on `center`.
-void draw_icon(ImDrawList* dl, const char* icon, ImVec2 center, ImU32 color) {
-    InkBox ink = icon_ink(icon);
-    ImVec2 pos(std::round(center.x - (ink.x0 + ink.x1) * 0.5f),
-               std::round(center.y - (ink.y0 + ink.y1) * 0.5f));
-    dl->AddText(pos, color, icon);
-}
-
-// An icon laid out like a text item (advance width x line height), centered
-// vertically on the line rather than sitting on the text baseline.
-void inline_icon(const char* icon, bool dim = true) {
-    ImVec2 size(ImGui::CalcTextSize(icon).x, ImGui::GetTextLineHeight());
-    ImGui::Dummy(size);
-    ImVec2 min = ImGui::GetItemRectMin();
-    ImVec2 max = ImGui::GetItemRectMax();
-    ImU32 color = ImGui::GetColorU32(dim ? ImGuiCol_TextDisabled : ImGuiCol_Text);
-    draw_icon(ImGui::GetWindowDrawList(), icon,
-              ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f), color);
-}
-
-// Square icon-only button of `size` with a tooltip; the icon is centered on
-// its visible bounds.
-bool icon_button(const char* icon, const char* tooltip, float size) {
-    ImVec2 pos = ImGui::GetCursorScreenPos();
-    bool pressed = ImGui::InvisibleButton(icon, ImVec2(size, size));
-    ImGui::SetItemTooltip("%s", tooltip);
-
-    ImGuiCol bg = ImGui::IsItemActive()    ? ImGuiCol_ButtonActive
-                  : ImGui::IsItemHovered() ? ImGuiCol_ButtonHovered
-                                           : ImGuiCol_Button;
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(pos, ImVec2(pos.x + size, pos.y + size), ImGui::GetColorU32(bg),
-                      ImGui::GetStyle().FrameRounding);
-    draw_icon(dl, icon, ImVec2(pos.x + size * 0.5f, pos.y + size * 0.5f),
-              ImGui::GetColorU32(ImGuiCol_Text));
-    return pressed;
-}
 
 bool toolbar_button(const char* icon, const char* tooltip) {
     return icon_button(icon, tooltip, ImGui::GetFrameHeight());
@@ -261,7 +175,8 @@ void AppUi::init(Window& window) {
     window_ = &window;
     display_scale_ = window.display_scale();
     load_fonts();
-    register_settings_handler();
+    load_settings();
+    register_state_handler();
     register_commands();
     apply_style();
     canvases_.push_back(std::make_unique<SchematicCanvas>(0));
@@ -312,15 +227,56 @@ void AppUi::apply_style() {
     applied_ui_scale_ = settings_.ui_scale;
 }
 
-// Stores Settings as a "[Netviz][Settings]" section in imgui.ini, next to
-// ImGui's own window and dock layout data.
-void AppUi::register_settings_handler() {
+// Reads settings.json, or on first start the preferences an older version
+// kept in imgui.ini.
+void AppUi::load_settings() {
+    const AppPaths& paths = window_->paths();
+    std::error_code ec;
+    if (std::filesystem::exists(paths.settings, ec)) {
+        if (std::optional<std::string> error = read_settings_file(paths.settings, settings_)) {
+            log_warn("Could not read {}: {}. Using default preferences; the file is not "
+                     "overwritten until it is fixed.",
+                     paths.settings.string(), *error);
+            settings_file_ok_ = false;
+        }
+    } else {
+        // Recent files come back with the layout (layout.ini starts as a copy).
+        std::vector<std::string> recent;
+        if (read_legacy_ini(paths.legacy_ini, settings_, recent))
+            log_info("Moved preferences from {} to {}", paths.legacy_ini.string(),
+                     paths.settings.string());
+        // Written now (even if all defaults) so there is a file to find and edit.
+        if (std::optional<std::string> error = write_settings_file(paths.settings, settings_))
+            log_error("Could not save preferences to {}: {}", paths.settings.string(), *error);
+    }
+    file_settings_ = settings_;
+    saved_settings_ = settings_;
+}
+
+void AppUi::save_settings() {
+    if (same_file_settings(settings_, file_settings_))
+        return;
+    file_settings_ = settings_;
+    if (!settings_file_ok_)
+        return;
+    if (std::optional<std::string> error =
+            write_settings_file(window_->paths().settings, settings_))
+        log_error("Could not save preferences to {}: {}", window_->paths().settings.string(),
+                  *error);
+}
+
+// Panel visibility and recent files as a "[Netviz][State]" section in
+// layout.ini, next to ImGui's own window and dock layout data. (Older
+// versions wrote "[Netviz][Settings]" with preferences too; only the state
+// keys are read from it here.)
+void AppUi::register_state_handler() {
     ImGuiSettingsHandler handler;
     handler.TypeName = "Netviz";
     handler.TypeHash = ImHashStr("Netviz");
     handler.UserData = this;
     handler.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler*, const char* name) -> void* {
-        return std::string_view(name) == "Settings" ? reinterpret_cast<void*>(1) : nullptr;
+        std::string_view entry(name);
+        return entry == "State" || entry == "Settings" ? reinterpret_cast<void*>(1) : nullptr;
     };
     handler.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler* h, void*, const char* line) {
         std::string_view text(line);
@@ -328,29 +284,21 @@ void AppUi::register_settings_handler() {
         if (eq == std::string_view::npos)
             return;
         static_cast<AppUi*>(h->UserData)
-            ->read_setting(std::string(text.substr(0, eq)), std::string(text.substr(eq + 1)));
+            ->read_state(std::string(text.substr(0, eq)), std::string(text.substr(eq + 1)));
     };
     handler.ApplyAllFn = [](ImGuiContext*, ImGuiSettingsHandler* h) {
         AppUi* self = static_cast<AppUi*>(h->UserData);
         self->saved_settings_ = self->settings_;
-        self->style_dirty_ = true;
     };
     handler.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* h, ImGuiTextBuffer* out) {
-        out->append(static_cast<AppUi*>(h->UserData)->write_settings().c_str());
+        out->append(static_cast<AppUi*>(h->UserData)->write_state().c_str());
     };
     ImGui::AddSettingsHandler(&handler);
 }
 
-void AppUi::read_setting(const std::string& key, const std::string& value) {
+void AppUi::read_state(const std::string& key, const std::string& value) {
     bool on = value == "1";
-    if (key == "Theme")
-        settings_.theme = (value == "Light") ? Theme::Light : Theme::Dark;
-    else if (key == "UiScale")
-        settings_.ui_scale =
-            std::clamp(std::strtof(value.c_str(), nullptr), kMinUiScale, kMaxUiScale);
-    else if (key == "ShowGrid")
-        settings_.show_grid = on;
-    else if (key == "ShowHierarchy")
+    if (key == "ShowHierarchy")
         settings_.show_hierarchy = on;
     else if (key == "ShowModules")
         settings_.show_modules = on;
@@ -358,33 +306,18 @@ void AppUi::read_setting(const std::string& key, const std::string& value) {
         settings_.show_properties = on;
     else if (key == "ShowConsole")
         settings_.show_console = on;
-    else if (key == "ShowPerfStats")
-        settings_.show_perf_stats = on;
-    else if (key == "Recent")
+    else if (key == "Recent" &&
+             std::find(recent_files_.begin(), recent_files_.end(), value) == recent_files_.end())
         recent_files_.push_back(value);
-    else if (key == "MinZoom")
-        settings_.min_zoom = std::clamp(std::strtof(value.c_str(), nullptr), 1e-4f, 1.0f);
-    else if (key == "MaxZoom")
-        settings_.max_zoom = std::clamp(std::strtof(value.c_str(), nullptr), 1.0f, 1000.0f);
-    else if (key == "MaxSchematicNodes")
-        settings_.max_schematic_nodes = static_cast<uint32_t>(
-            std::clamp(std::strtol(value.c_str(), nullptr, 10), 1000L, 10000000L));
 }
 
-std::string AppUi::write_settings() const {
+std::string AppUi::write_state() const {
     std::ostringstream out;
-    out << "[Netviz][Settings]\n";
-    out << "Theme=" << (settings_.theme == Theme::Light ? "Light" : "Dark") << "\n";
-    out << "UiScale=" << settings_.ui_scale << "\n";
-    out << "ShowGrid=" << settings_.show_grid << "\n";
+    out << "[Netviz][State]\n";
     out << "ShowHierarchy=" << settings_.show_hierarchy << "\n";
     out << "ShowModules=" << settings_.show_modules << "\n";
     out << "ShowProperties=" << settings_.show_properties << "\n";
     out << "ShowConsole=" << settings_.show_console << "\n";
-    out << "ShowPerfStats=" << settings_.show_perf_stats << "\n";
-    out << "MinZoom=" << settings_.min_zoom << "\n";
-    out << "MaxZoom=" << settings_.max_zoom << "\n";
-    out << "MaxSchematicNodes=" << settings_.max_schematic_nodes << "\n";
     for (const std::string& path : recent_files_)
         out << "Recent=" << path << "\n";
     out << "\n";
@@ -972,6 +905,7 @@ void AppUi::draw() {
     if (show_imgui_metrics_)
         ImGui::ShowMetricsWindow(&show_imgui_metrics_);
 
+    save_settings();
     if (settings_ != saved_settings_) {
         ImGui::MarkIniSettingsDirty();
         saved_settings_ = settings_;

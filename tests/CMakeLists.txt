@@ -4,8 +4,12 @@ add_executable(netviz_tests
     test_yosys_json.cc
     test_display_graph.cc
     test_layout.cc
-    test_view.cc)
-target_link_libraries(netviz_tests PRIVATE netviz_layout netviz_io doctest::doctest_with_main)
+    test_view.cc
+    test_settings.cc
+    # The preferences file has no GUI dependencies; test it without the GUI library.
+    ${PROJECT_SOURCE_DIR}/src/netviz/gui/settings_file.cc)
+target_link_libraries(netviz_tests PRIVATE netviz_layout netviz_io simdjson::simdjson
+                                           doctest::doctest_with_main)
 netviz_set_warnings(netviz_tests)
 target_compile_definitions(netviz_tests PRIVATE NETVIZ_EXAMPLES_DIR="${PROJECT_SOURCE_DIR}/ex")
 
