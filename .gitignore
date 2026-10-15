@@ -1,0 +1,8 @@
+build/
+.cache/
+.vscode/
+.bak/
+*.ini
+
+# Personal CMake presets (the shared ones live in CMakePresets.json)
+CMakeUserPresets.json

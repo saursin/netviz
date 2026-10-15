@@ -1,0 +1,23 @@
+#pragma once
+
+#include <cstddef>
+
+// Fonts from third_party/, embedded into the binary at build time
+// (see netviz_embed_file in cmake/EmbedFile.cmake).
+extern const unsigned char inter_ttf[]; // UI text
+extern const std::size_t inter_ttf_size;
+extern const unsigned char jetbrains_mono_ttf[]; // console / monospace
+extern const std::size_t jetbrains_mono_ttf_size;
+extern const unsigned char lucide_ttf[]; // icons
+extern const std::size_t lucide_ttf_size;
+
+// UTF-8 strings for Lucide icons, usable directly in ImGui labels.
+// Codepoints come from third_party/lucide/codepoints.json.
+namespace netviz::icons {
+
+inline constexpr const char* kOpen = "\xee\x83\x97";      // folder     U+E0D7
+inline constexpr const char* kZoomIn = "\xee\x86\xb6";    // zoom-in    U+E1B6
+inline constexpr const char* kZoomOut = "\xee\x86\xb7";   // zoom-out   U+E1B7
+inline constexpr const char* kResetView = "\xee\x89\x97"; // scan       U+E257
+
+} // namespace netviz::icons
