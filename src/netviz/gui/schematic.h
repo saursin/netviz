@@ -2,6 +2,7 @@
 
 #include "netviz/gui/rules.h"
 #include "netviz/layout/layered_layout.h"
+#include "netviz/layout/route_shapes.h"
 #include "netviz/view/spatial_grid.h"
 
 #include <imgui.h>
@@ -62,9 +63,38 @@ struct Schematic {
         int64_t selected_net = -1, hovered_net = -1;
         int64_t hovered_tag = -1; // instance whose "+" tag is under the cursor
     };
+    struct DrawOptions {
+        bool light_theme = false;
+        bool round_corners = false;
+        bool arrows = false;
+        float animation_time = -1.0f; // seconds; >= 0 animates the selected net
+    };
     // Draws the visible part.
     void draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, const StringPool& names,
-              bool light_theme, const Marks& marks) const;
+              const DrawOptions& options, const Marks& marks) const;
+
+    // Drawing styles computed when first needed (UI thread only), so they
+    // cost nothing while their options are off:
+    // the net's corners rounded (see route_shapes.h);
+    const RoundedRoute& rounded(uint32_t net) const;
+    // the net's wires split at junctions and oriented from drivers to loads.
+    const std::vector<FlowEdge>& flow(uint32_t net) const;
+    // The net's wire as drawn (with or without rounded corners), as straight
+    // pieces and corner arcs oriented from drivers to loads, each with the
+    // wire distance from the drivers at its ends: for the animation.
+    struct AnimationPiece {
+        Vec2 a, b;   // start and end, in flow direction
+        Vec2 center; // arcs only
+        float d0 = 0.0f, d1 = 0.0f;
+        bool arc = false;
+    };
+    const std::vector<AnimationPiece>& animation_path(uint32_t net, bool rounded) const;
+
+  private:
+    // Per net, made on first use (an array: looked up for every drawn net).
+    mutable std::vector<std::unique_ptr<RoundedRoute>> rounded_;
+    mutable std::map<uint32_t, std::vector<FlowEdge>> flow_; // by net
+    mutable std::map<std::pair<uint32_t, bool>, std::vector<AnimationPiece>> animation_;
 };
 
 // Builds schematics in the background and caches them, for all canvases.

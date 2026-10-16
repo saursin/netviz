@@ -4,6 +4,7 @@ add_executable(netviz_tests
     test_yosys_json.cc
     test_display_graph.cc
     test_layout.cc
+    test_route_shapes.cc
     test_view.cc
     test_settings.cc
     test_rules.cc

@@ -157,7 +157,13 @@ void SchematicCanvas::draw_scene(Context& ctx, ImDrawList* dl, ImVec2 origin) {
         return;
     const StringPool& names = design->names();
     if (s) {
-        s->draw(dl, camera_, origin, names, ctx.settings.theme == Theme::Light, marks(ctx, *s));
+        Schematic::DrawOptions options;
+        options.light_theme = ctx.settings.theme == Theme::Light;
+        options.round_corners = ctx.settings.round_wires;
+        options.arrows = ctx.settings.wire_arrows;
+        if (ctx.settings.animate_selection)
+            options.animation_time = static_cast<float>(ImGui::GetTime());
+        s->draw(dl, camera_, origin, names, options, marks(ctx, *s));
         return;
     }
 

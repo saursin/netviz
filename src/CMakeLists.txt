@@ -30,7 +30,8 @@ target_link_libraries(netviz_view PUBLIC netviz_core)
 netviz_set_warnings(netviz_view)
 
 add_library(netviz_layout
-    netviz/layout/layered_layout.cc)
+    netviz/layout/layered_layout.cc
+    netviz/layout/route_shapes.cc)
 target_link_libraries(netviz_layout PUBLIC netviz_view)
 netviz_set_warnings(netviz_layout)
 

@@ -20,6 +20,10 @@ struct Settings {
     // Modules with more display nodes (cells and ports) are not laid out or
     // drawn: large ones are slow to draw until level of detail exists.
     uint32_t max_schematic_nodes = 50000;
+    // Wires (Preferences > Canvas).
+    bool round_wires = false;       // rounded corners where wires bend
+    bool wire_arrows = false;       // arrowheads where wires leave drivers and enter loads
+    bool animate_selection = false; // moving dashes along the selected net, driver to loads
 
     // Quick view toggles (menus)
     bool show_grid = true;

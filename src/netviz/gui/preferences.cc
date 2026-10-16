@@ -172,6 +172,9 @@ void PreferencesWindow::copy_config(const Settings& from, Settings& to) {
     to.min_zoom = from.min_zoom;
     to.max_zoom = from.max_zoom;
     to.max_schematic_nodes = from.max_schematic_nodes;
+    to.round_wires = from.round_wires;
+    to.wire_arrows = from.wire_arrows;
+    to.animate_selection = from.animate_selection;
     to.signal_rules = from.signal_rules;
     to.cell_rules = from.cell_rules;
 }
@@ -179,7 +182,9 @@ void PreferencesWindow::copy_config(const Settings& from, Settings& to) {
 bool PreferencesWindow::same_config(const Settings& a, const Settings& b) {
     return a.theme == b.theme && a.ui_scale == b.ui_scale && a.min_zoom == b.min_zoom &&
            a.max_zoom == b.max_zoom && a.max_schematic_nodes == b.max_schematic_nodes &&
-           a.signal_rules == b.signal_rules && a.cell_rules == b.cell_rules;
+           a.signal_rules == b.signal_rules && a.cell_rules == b.cell_rules &&
+           a.round_wires == b.round_wires && a.wire_arrows == b.wire_arrows &&
+           a.animate_selection == b.animate_selection;
 }
 
 void PreferencesWindow::draw(Settings& settings) {
@@ -233,6 +238,9 @@ void PreferencesWindow::draw(Settings& settings) {
             draft_.min_zoom = defaults.min_zoom;
             draft_.max_zoom = defaults.max_zoom;
             draft_.max_schematic_nodes = defaults.max_schematic_nodes;
+            draft_.round_wires = defaults.round_wires;
+            draft_.wire_arrows = defaults.wire_arrows;
+            draft_.animate_selection = defaults.animate_selection;
         } else {
             draft_.signal_rules = defaults.signal_rules;
             draft_.cell_rules = defaults.cell_rules;
@@ -314,6 +322,15 @@ void PreferencesWindow::draw_canvas(Settings& settings) {
                           "Large schematics take a while to lay out and are slow to pan\n"
                           "and zoom when zoomed out (1,000 - 10,000,000)");
     ImGui::EndTable();
+
+    ImGui::SeparatorText("Wires");
+    ImGui::Checkbox("Rounded corners", &settings.round_wires);
+    ImGui::SetItemTooltip("Draw bends in wires as small arcs");
+    ImGui::Checkbox("Direction arrows", &settings.wire_arrows);
+    ImGui::SetItemTooltip("Arrowheads where wires leave their drivers and enter their loads");
+    ImGui::Checkbox("Animate the selected net", &settings.animate_selection);
+    ImGui::SetItemTooltip("Dashes moving along the selected net, from its driver to its loads.\n"
+                          "The window redraws continuously while a net is selected.");
 }
 
 bool PreferencesWindow::list_field(const char* label, const std::string& formatted,

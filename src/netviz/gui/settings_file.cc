@@ -235,6 +235,9 @@ std::optional<std::string> parse_settings(std::string_view json, Settings& setti
         read(o, "max_zoom", s.max_zoom, kMaxZoomLow, kMaxZoomHigh);
         read(o, "show_grid", s.show_grid);
         read(o, "max_schematic_nodes", s.max_schematic_nodes, kMinNodes, kMaxNodes);
+        read(o, "round_wires", s.round_wires);
+        read(o, "wire_arrows", s.wire_arrows);
+        read(o, "animate_selection", s.animate_selection);
     }
     if (section(root, "console", o))
         read(o, "wrap", s.console_wrap);
@@ -273,7 +276,10 @@ std::string settings_to_json(const Settings& s) {
     out += std::format("    \"min_zoom\": {},\n", number(s.min_zoom));
     out += std::format("    \"max_zoom\": {},\n", number(s.max_zoom));
     out += std::format("    \"show_grid\": {},\n", s.show_grid);
-    out += std::format("    \"max_schematic_nodes\": {}\n", s.max_schematic_nodes);
+    out += std::format("    \"max_schematic_nodes\": {},\n", s.max_schematic_nodes);
+    out += std::format("    \"round_wires\": {},\n", s.round_wires);
+    out += std::format("    \"wire_arrows\": {},\n", s.wire_arrows);
+    out += std::format("    \"animate_selection\": {}\n", s.animate_selection);
     out += "  },\n";
     out += "  \"console\": {\n";
     out += std::format("    \"wrap\": {}\n", s.console_wrap);
@@ -354,8 +360,9 @@ bool same_file_settings(const Settings& a, const Settings& b) {
     return a.theme == b.theme && a.ui_scale == b.ui_scale && a.min_zoom == b.min_zoom &&
            a.max_zoom == b.max_zoom && a.max_schematic_nodes == b.max_schematic_nodes &&
            a.show_grid == b.show_grid && a.show_perf_stats == b.show_perf_stats &&
-           a.console_wrap == b.console_wrap && a.signal_rules == b.signal_rules &&
-           a.cell_rules == b.cell_rules;
+           a.console_wrap == b.console_wrap && a.round_wires == b.round_wires &&
+           a.wire_arrows == b.wire_arrows && a.animate_selection == b.animate_selection &&
+           a.signal_rules == b.signal_rules && a.cell_rules == b.cell_rules;
 }
 
 bool read_legacy_ini(const std::filesystem::path& path, Settings& s,

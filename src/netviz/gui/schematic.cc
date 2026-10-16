@@ -76,8 +76,11 @@ ImU32 rgb(RuleColor c) {
 
 // A dashed line from a to b in screen space, drawn only inside `clip`. The
 // pattern starts at `a`, so it does not crawl when a long line is clipped.
+// With `round_ends`, each dash gets anti-aliased round ends: ImGui smooths
+// only the sides of a line, so moving dashes would otherwise step by whole
+// pixels at their ends (jerky animation).
 void dashed_line(ImDrawList* dl, ImVec2 a, ImVec2 b, ImU32 color, float thickness, float dash,
-                 float gap, const ImVec4& clip) {
+                 float gap, const ImVec4& clip, float phase = 0.0f, bool round_ends = false) {
     float dx = b.x - a.x, dy = b.y - a.y;
     float length = std::sqrt(dx * dx + dy * dy);
     if (length <= 0.0f)
@@ -96,12 +99,44 @@ void dashed_line(ImDrawList* dl, ImVec2 a, ImVec2 b, ImU32 color, float thicknes
     };
     narrow(a.x, ux, clip.x, clip.z);
     narrow(a.y, uy, clip.y, clip.w);
+    // Dashes start where (t + phase) is a multiple of the period.
     float period = dash + gap;
-    for (float t = std::floor(t0 / period) * period; t < t1; t += period) {
+    for (float t = std::floor((t0 + phase) / period) * period - phase; t < t1; t += period) {
         float e = std::min(t + dash, length);
-        dl->AddLine(ImVec2(a.x + ux * t, a.y + uy * t), ImVec2(a.x + ux * e, a.y + uy * e), color,
-                    thickness);
+        if (e <= 0.0f)
+            continue;
+        float start = std::max(t, 0.0f); // (not t: later dashes must keep the pattern)
+        ImVec2 p0(a.x + ux * start, a.y + uy * start), p1(a.x + ux * e, a.y + uy * e);
+        dl->AddLine(p0, p1, color, thickness);
+        if (round_ends) {
+            dl->AddCircleFilled(p0, thickness * 0.5f, color, 8);
+            dl->AddCircleFilled(p1, thickness * 0.5f, color, 8);
+        }
     }
+}
+
+constexpr float kCornerRadius = 4.0f; // rounded wire corners, world units (< half a track)
+
+// A quarter circle from `from` to `to` around `center` (screen space). Wire
+// corners are axis-aligned, so each end is one of 4 directions; ImGui's fast
+// arc draws from a precomputed table of circle points (12 steps per turn,
+// y down), with no trigonometry per corner.
+void corner_arc(ImDrawList* dl, ImVec2 center, ImVec2 from, ImVec2 to, ImU32 color,
+                float thickness) {
+    auto step = [&](ImVec2 p) { // direction from the center, in twelfths of a turn
+        float dx = p.x - center.x, dy = p.y - center.y;
+        if (std::abs(dx) >= std::abs(dy))
+            return dx >= 0.0f ? 0 : 6;
+        return dy >= 0.0f ? 3 : 9;
+    };
+    int a0 = step(from), a1 = step(to);
+    if (a1 - a0 > 6) // the short way round
+        a1 -= 12;
+    else if (a0 - a1 > 6)
+        a1 += 12;
+    float r = std::max(std::abs(from.x - center.x), std::abs(from.y - center.y));
+    dl->PathArcToFast(center, r, a0, a1);
+    dl->PathStroke(color, thickness);
 }
 
 // The "+" tag of a submodule instance: in its top-left corner, in the row
@@ -460,8 +495,86 @@ int64_t Schematic::net_of(SigBit bit) const {
     return net == kNoNet ? -1 : net;
 }
 
+const RoundedRoute& Schematic::rounded(uint32_t net) const {
+    if (rounded_.empty())
+        rounded_.resize(layout.nets.size());
+    std::unique_ptr<RoundedRoute>& cached = rounded_[net];
+    if (!cached)
+        cached = std::make_unique<RoundedRoute>(round_corners(layout.nets[net], kCornerRadius));
+    return *cached;
+}
+
+const std::vector<FlowEdge>& Schematic::flow(uint32_t net) const {
+    auto it = flow_.find(net);
+    if (it != flow_.end())
+        return it->second;
+    std::vector<Vec2> sources;
+    for (DisplayPinId p : graph.drivers(graph.nets()[net]))
+        sources.push_back(layout.pins[p.index]);
+    return flow_[net] = flow_edges(layout.nets[net], sources);
+}
+
+const std::vector<Schematic::AnimationPiece>& Schematic::animation_path(uint32_t net,
+                                                                        bool round) const {
+    auto it = animation_.find({net, round});
+    if (it != animation_.end())
+        return it->second;
+    std::vector<AnimationPiece>& out = animation_[{net, round}];
+    const std::vector<FlowEdge>& edges = flow(net);
+    auto length = [](Vec2 a, Vec2 b) { return std::abs(b.x - a.x) + std::abs(b.y - a.y); };
+    auto toward = [&](Vec2 from, Vec2 to, float r) { // `r` along an axis-aligned line
+        float len = length(from, to);
+        return len > 0.0f
+                   ? Vec2{from.x + (to.x - from.x) / len * r, from.y + (to.y - from.y) / len * r}
+                   : from;
+    };
+
+    // Corners by their bend point (from + to - center), and the edges that
+    // end and start there.
+    using Key = std::pair<float, float>;
+    std::map<Key, const Corner*> corners;
+    if (round)
+        for (const Corner& c : rounded(net).corners)
+            corners[{c.from.x + c.to.x - c.center.x, c.from.y + c.to.y - c.center.y}] = &c;
+    std::map<Key, const FlowEdge*> ending, starting;
+    for (const FlowEdge& e : edges) {
+        ending[{e.to.x, e.to.y}] = &e;
+        starting[{e.from.x, e.from.y}] = &e;
+    }
+
+    // Straight pieces, shortened where a corner is.
+    for (const FlowEdge& e : edges) {
+        AnimationPiece p{e.from, e.to, {}, e.distance, e.distance + length(e.from, e.to), false};
+        if (auto c = corners.find({e.from.x, e.from.y}); c != corners.end()) {
+            p.a = toward(e.from, e.to, c->second->radius);
+            p.d0 += c->second->radius;
+        }
+        if (auto c = corners.find({e.to.x, e.to.y}); c != corners.end()) {
+            p.b = toward(e.to, e.from, c->second->radius);
+            p.d1 -= c->second->radius;
+        }
+        if (p.d1 > p.d0)
+            out.push_back(p);
+    }
+    // Corner arcs, in the direction the signal goes round them. The square
+    // corner's distance (2r) is spread over the arc, so dashes are continuous
+    // where the arc meets the straight pieces.
+    for (const auto& [bend, c] : corners) {
+        auto in = ending.find(bend), next = starting.find(bend);
+        if (in == ending.end() || next == starting.end())
+            continue; // flow does not pass through this corner
+        Vec2 p{bend.first, bend.second};
+        float d = in->second->distance + length(in->second->from, p);
+        out.push_back(AnimationPiece{toward(p, in->second->from, c->radius),
+                                     toward(p, next->second->to, c->radius), c->center,
+                                     d - c->radius, d + c->radius, true});
+    }
+    return out;
+}
+
 void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, const StringPool& names,
-                     bool light_theme, const Marks& marks) const {
+                     const DrawOptions& options, const Marks& marks) const {
+    bool light_theme = options.light_theme;
     int64_t selected = marks.selected_node;
     int64_t hovered = marks.hovered_node;
     const Colors& c = light_theme ? kLight : kDark;
@@ -497,6 +610,9 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
                                                                         : nullptr;
     };
 
+    // Corners under ~1.5 px look the same square; skip the arcs then.
+    bool round_corners = options.round_corners && kCornerRadius * zoom >= 1.5f;
+
     // Wires (unhighlighted first, so highlighted ones are drawn on top).
     for (int pass = 0; pass < 2; pass++) {
         for (size_t n = 0; n < layout.nets.size(); n++) {
@@ -508,18 +624,40 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
             ImU32 color = pass ? c.highlight : rule ? rgb(rule->color) : bus ? c.bus : c.wire;
             float thickness =
                 (bus ? 2.5f : 1.2f) * (rule ? rule->width : 1.0f) * (pass ? 1.5f : 1.0f);
-            bool dashed = rule && rule->line == LineStyle::Dashed;
+            // The animated net is drawn solid, so its moving dashes do not mix
+            // with a rule's dashes.
+            bool animated =
+                options.animation_time >= 0.0f && static_cast<int64_t>(n) == marks.selected_net;
+            bool dashed = rule && rule->line == LineStyle::Dashed && !animated;
             const NetRoute& route = layout.nets[n];
-            for (const Segment& s : route.segments) {
+            const RoundedRoute* round = nullptr; // fetched once a segment is visible
+            for (size_t k = 0; k < route.segments.size(); k++) {
+                Segment s = route.segments[k];
                 Rect box{Vec2{std::min(s.a.x, s.b.x), std::min(s.a.y, s.b.y)},
                          Vec2{std::max(s.a.x, s.b.x), std::max(s.a.y, s.b.y)}};
                 if (!intersects(box, visible))
                     continue;
+                if (round_corners && !round)
+                    round = &rounded(static_cast<uint32_t>(n));
+                if (round) { // shortened to make room for the arcs
+                    float len = std::abs(s.b.x - s.a.x) + std::abs(s.b.y - s.a.y);
+                    if (len > 0.0f) {
+                        Vec2 d{(s.b.x - s.a.x) / len, (s.b.y - s.a.y) / len};
+                        float ta = round->trim[k][0], tb = round->trim[k][1];
+                        s = Segment{Vec2{s.a.x + d.x * ta, s.a.y + d.y * ta},
+                                    Vec2{s.b.x - d.x * tb, s.b.y - d.y * tb}};
+                    }
+                }
                 if (dashed)
                     dashed_line(dl, screen(s.a), screen(s.b), color, thickness, 6.0f, 4.0f, clip);
                 else
                     dl->AddLine(screen(s.a), screen(s.b), color, thickness);
             }
+            if (round)
+                for (const Corner& corner : round->corners)
+                    if (intersects(Rect{corner.center, corner.center}, visible))
+                        corner_arc(dl, screen(corner.center), screen(corner.from),
+                                   screen(corner.to), color, thickness);
             float dot = std::clamp(3.0f * zoom, 2.0f, 5.0f);
             for (Vec2 j : route.junctions)
                 if (intersects(Rect{j, j}, visible))
@@ -539,6 +677,54 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
     float rounding = std::min(4.0f * zoom, 8.0f);
     float shadow = std::clamp(3.0f * zoom, 1.0f, 6.0f);
     float pad = 4.0f * zoom;
+    // The selected net, animated: dashes moving from its drivers to its loads.
+    if (options.animation_time >= 0.0f && marks.selected_net >= 0 &&
+        !unrouted[marks.selected_net]) {
+        constexpr float kDash = 6.0f, kGap = 8.0f, kSpeed = 40.0f; // px, px, px/s
+        ImU32 color = light_theme ? IM_COL32(255, 255, 255, 230) : IM_COL32(30, 30, 30, 220);
+        float thickness = g.nets()[marks.selected_net].bit_count > 1 ? 2.2f : 1.6f;
+        float shift = options.animation_time * kSpeed; // px the pattern has moved
+        const auto& path = animation_path(static_cast<uint32_t>(marks.selected_net), round_corners);
+        for (const AnimationPiece& p : path) {
+            Rect box{Vec2{std::min(p.a.x, p.b.x), std::min(p.a.y, p.b.y)},
+                     Vec2{std::max(p.a.x, p.b.x), std::max(p.a.y, p.b.y)}};
+            if (p.arc)
+                box = Rect{Vec2{std::min(box.min.x, p.center.x), std::min(box.min.y, p.center.y)},
+                           Vec2{std::max(box.max.x, p.center.x), std::max(box.max.y, p.center.y)}};
+            if (!intersects(box, visible))
+                continue;
+            if (!p.arc) {
+                dashed_line(dl, screen(p.a), screen(p.b), color, thickness, kDash, kGap, clip,
+                            p.d0 * zoom - shift, true);
+                continue;
+            }
+            // An arc: short chords, each dashed at its share of the distance;
+            // the pattern is scaled to the chord so dashes stay continuous.
+            ImVec2 mid = screen(p.center), a = screen(p.a), b = screen(p.b);
+            float r = std::hypot(a.x - mid.x, a.y - mid.y);
+            float a0 = std::atan2(a.y - mid.y, a.x - mid.x),
+                  a1 = std::atan2(b.y - mid.y, b.x - mid.x);
+            constexpr float kPi = 3.14159265f;
+            if (a1 - a0 > kPi)
+                a1 -= 2.0f * kPi;
+            else if (a0 - a1 > kPi)
+                a1 += 2.0f * kPi;
+            int steps = std::clamp(static_cast<int>(r * 0.5f), 3, 12);
+            float span = (p.d1 - p.d0) / static_cast<float>(steps) * zoom; // px of distance
+            for (int i = 0; i < steps; i++) {
+                float t0 = a0 + (a1 - a0) * static_cast<float>(i) / static_cast<float>(steps);
+                float t1 = a0 + (a1 - a0) * static_cast<float>(i + 1) / static_cast<float>(steps);
+                ImVec2 q0(mid.x + r * std::cos(t0), mid.y + r * std::sin(t0));
+                ImVec2 q1(mid.x + r * std::cos(t1), mid.y + r * std::sin(t1));
+                float chord = std::hypot(q1.x - q0.x, q1.y - q0.y);
+                float scale = span > 0.0f ? chord / span : 1.0f;
+                float phase = (p.d0 * zoom + span * static_cast<float>(i) - shift) * scale;
+                dashed_line(dl, q0, q1, color, thickness, kDash * scale, kGap * scale, clip, phase,
+                            true);
+            }
+        }
+    }
+
     // Nodes near the view (label stubs and names reach a little outside them).
     Rect around{Vec2{visible.min.x - 100.0f, visible.min.y},
                 Vec2{visible.max.x + 100.0f, visible.max.y}};
@@ -624,6 +810,19 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
                 ImU32 color = rule ? rgb(rule->color) : pins[i].width > 1 ? c.bus : c.wire;
                 dl->AddRectFilled(ImVec2(p.x - mark, p.y - mark), ImVec2(p.x + mark, p.y + mark),
                                   color);
+            }
+            // Direction arrows, pointing the way signals flow (left to right):
+            // leaving a driver pin (right side), entering a load pin (left).
+            float arrow = 4.0f * zoom;
+            if (options.arrows && net != kNoNet && !unrouted[net] && arrow >= 2.5f) {
+                ImU32 color = highlight[net]                ? c.highlight
+                              : rule                        ? rgb(rule->color)
+                              : g.nets()[net].bit_count > 1 ? c.bus
+                                                            : c.wire;
+                float base = pins[i].side == PinSide::Right ? p.x + mark + 1.0f
+                                                            : p.x - mark - 1.0f - arrow * 1.4f;
+                dl->AddTriangleFilled(ImVec2(base, p.y - arrow), ImVec2(base + arrow * 1.4f, p.y),
+                                      ImVec2(base, p.y + arrow), color);
             }
             if (cell && rule && rule->marker == PinMarker::Clock && pins[i].side == PinSide::Left &&
                 clock >= 2.0f)

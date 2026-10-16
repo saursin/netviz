@@ -19,6 +19,9 @@ Settings changed() {
     s.max_schematic_nodes = 123456;
     s.show_perf_stats = true;
     s.console_wrap = true;
+    s.round_wires = true;
+    s.wire_arrows = true;
+    s.animate_selection = true;
     return s;
 }
 
