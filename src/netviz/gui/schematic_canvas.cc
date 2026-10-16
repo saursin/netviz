@@ -121,6 +121,7 @@ Schematic::Marks SchematicCanvas::marks(const Context& ctx, const Schematic& s) 
     Schematic::Marks m;
     m.hovered_node = hovered_node_;
     m.hovered_net = hovered_net_;
+    m.hovered_tag = hovered_tag_;
     const Design* design = ctx.panels.design();
     const auto& selection = ctx.panels.selection();
     if (!selection || selection->module != place_.module || selection->path != place_.path)
@@ -143,7 +144,10 @@ Schematic::Marks SchematicCanvas::marks(const Context& ctx, const Schematic& s) 
 // The schematic, or a message saying why there is none.
 void SchematicCanvas::draw_scene(Context& ctx, ImDrawList* dl, ImVec2 origin) {
     const Schematic* s = schematic(ctx);
+    hovered_tag_ = s && panel_.hovered() ? s->pick_expand(panel_.mouse_world()) : -1;
     hovered_node_ = s && panel_.hovered() ? s->pick(panel_.mouse_world()) : -1;
+    if (hovered_tag_ >= 0)
+        hovered_node_ = hovered_tag_; // the tag belongs to its instance
     // Wires a few pixels wide are easy to hit at any zoom.
     hovered_net_ = s && panel_.hovered() && hovered_node_ < 0
                        ? s->pick_net(panel_.mouse_world(), kNetPickPixels / camera_.zoom())
@@ -265,7 +269,10 @@ void SchematicCanvas::draw_tooltip(Context& ctx) const {
         break;
     case NodeKind::Instance:
         ImGui::TextDisabled("instance of %s, %u pins", names.str(n.type).c_str(), n.pin_count);
-        ImGui::TextDisabled("Double-click to open, middle-click to open in a new canvas");
+        ImGui::TextDisabled(hovered_tag_ >= 0
+                                ? "Click to open"
+                                : "Double-click (or click +) to open, middle-click to open in a "
+                                  "new canvas");
         break;
     default: {
         const char* direction = n.kind == NodeKind::InputPort    ? "input"
@@ -313,6 +320,11 @@ void SchematicCanvas::handle_events(Context& ctx, const CanvasEvents& events, Re
         inside = Place::place(std::move(path), child);
     }
 
+    if (events.clicked && hovered_tag_ >= 0 && inside) { // the "+" tag opens the instance
+        navigate(*inside);
+        ctx.panels.select(*inside);
+        return;
+    }
     if (events.middle_clicked && inside)
         requests.open_in_new_canvas = inside;
     std::string menu = std::format("instance_menu{}", id_);

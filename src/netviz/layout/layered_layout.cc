@@ -139,7 +139,14 @@ class LayeredLayout {
         const DisplayNode& node = g_.nodes()[v];
         if (node.kind != NodeKind::Cell && node.kind != NodeKind::Instance)
             return Vec2{x, height_[v] * 0.5f};
-        return Vec2{x, (static_cast<float>(pin.order) + 0.5f) * o_.line_height};
+        return Vec2{x, (static_cast<float>(pin.order + first_row(node, pin.side)) + 0.5f) *
+                           o_.line_height};
+    }
+
+    // Row of a node's first pin on a side. Submodule instances keep their
+    // top-left corner free for the "+" tag that opens them.
+    static uint32_t first_row(const DisplayNode& node, PinSide side) {
+        return node.kind == NodeKind::Instance && side == PinSide::Left ? 1 : 0;
     }
 
     float pin_y(uint32_t pin) const { return y_[node_of_pin(pin)] + pin_offset(pin).y; }
@@ -168,7 +175,8 @@ class LayeredLayout {
             float label = std::max(name, text_width(node.type));
             float sides = 2.0f * (std::max(left, right) + 2.0f * pad);
             width_[v] = grid_ceil(std::max(label + sides, 5.0f * o_.char_width));
-            uint32_t rows = std::max({node.left_pins, node.right_pins, label_lines(v)});
+            uint32_t rows = std::max(
+                {node.left_pins + first_row(node, PinSide::Left), node.right_pins, label_lines(v)});
             height_[v] = static_cast<float>(rows) * o_.line_height;
         }
     }

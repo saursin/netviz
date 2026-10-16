@@ -78,6 +78,7 @@ class SchematicCanvas {
     ModuleId shown_module_;
     int64_t hovered_node_ = -1;
     int64_t hovered_net_ = -1; // when no node is under the cursor
+    int64_t hovered_tag_ = -1; // instance whose "+" tag is under the cursor
     std::optional<unsigned int> dock_at_;
     Place menu_place_; // the instance whose context menu is open
 };

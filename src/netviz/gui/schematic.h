@@ -45,6 +45,11 @@ struct Schematic {
     bool too_large() const { return layout.status == LayoutResult::Status::TooLarge; }
     // Display node under a world-space point, or -1.
     int64_t pick(Vec2 world) const { return too_large() ? -1 : grid.pick(world); }
+    // The "+" tag in a submodule instance's top-left corner (clicking it opens
+    // the instance), in world units.
+    Rect expand_tag(uint32_t node) const;
+    // The instance whose "+" tag is at a world-space point, or -1.
+    int64_t pick_expand(Vec2 world) const;
     // Display net with a wire within `tolerance` (world units) of a point, or -1.
     int64_t pick_net(Vec2 world, float tolerance) const;
     // The display net carrying a signal bit, or -1.
@@ -55,6 +60,7 @@ struct Schematic {
     struct Marks {
         int64_t selected_node = -1, hovered_node = -1;
         int64_t selected_net = -1, hovered_net = -1;
+        int64_t hovered_tag = -1; // instance whose "+" tag is under the cursor
     };
     // Draws the visible part.
     void draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, const StringPool& names,

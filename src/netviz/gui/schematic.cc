@@ -55,7 +55,9 @@ const Colors kLight = {{IM_COL32(104, 116, 140, 255), IM_COL32(52, 112, 210, 255
                        IM_COL32(230, 140, 0, 255),
                        IM_COL32(40, 110, 220, 255)};
 
-constexpr float kStub = 15.0f; // length of a label net's stub at each pin, world units
+constexpr float kStub = 15.0f;        // length of a label net's stub at each pin, world units
+constexpr float kTagSize = 10.0f;     // the "+" tag of instances, world units
+constexpr float kMinTagPixels = 5.0f; // smaller tags are not drawn
 
 NodeStyle node_style(const DisplayNode& node) {
     switch (node.kind) {
@@ -100,6 +102,14 @@ void dashed_line(ImDrawList* dl, ImVec2 a, ImVec2 b, ImU32 color, float thicknes
         dl->AddLine(ImVec2(a.x + ux * t, a.y + uy * t), ImVec2(a.x + ux * e, a.y + uy * e), color,
                     thickness);
     }
+}
+
+// The "+" tag of a submodule instance: in its top-left corner, in the row
+// the layout leaves free above the left pins. World units.
+Rect instance_tag(const Rect& box) {
+    float inset = (kLayoutOptions.line_height - kTagSize) * 0.5f;
+    Vec2 min{box.min.x + inset, box.min.y + inset};
+    return Rect{min, Vec2{min.x + kTagSize, min.y + kTagSize}};
 }
 
 // `a` blended toward `b` by t (0..1).
@@ -426,6 +436,23 @@ int64_t Schematic::pick_net(Vec2 p, float tolerance) const {
     return best;
 }
 
+Rect Schematic::expand_tag(uint32_t v) const {
+    return instance_tag(layout.nodes[v]);
+}
+
+int64_t Schematic::pick_expand(Vec2 p) const {
+    if (too_large())
+        return -1;
+    for (uint32_t v : grid.query(Rect{p, p})) {
+        if (graph.nodes()[v].kind != NodeKind::Instance)
+            continue;
+        Rect tag = expand_tag(v);
+        if (p.x >= tag.min.x && p.x <= tag.max.x && p.y >= tag.min.y && p.y <= tag.max.y)
+            return v;
+    }
+    return -1;
+}
+
 int64_t Schematic::net_of(SigBit bit) const {
     if (bit.is_constant() || bit.signal().index >= net_of_bit.size())
         return -1;
@@ -565,6 +592,24 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
                 dl->AddPolyline(pts, count, border, border_px, ImDrawFlags_Closed);
         }
 
+        // Submodule instances: a "+" tag in the top-left corner opens them.
+        if (node.kind == NodeKind::Instance) {
+            Rect tag = instance_tag(box);
+            ImVec2 t0 = screen(tag.min), t1 = screen(tag.max);
+            float size = t1.x - t0.x;
+            if (size >= kMinTagPixels) {
+                bool over = marks.hovered_tag == v;
+                float round = std::min(2.0f, size * 0.2f);
+                dl->AddRectFilled(t0, t1, over ? accent : mix(c.body, accent, 0.35f), round);
+                dl->AddRect(t0, t1, over ? c.hovered : accent, round, 1.0f);
+                float mid_x = (t0.x + t1.x) * 0.5f, mid_y = (t0.y + t1.y) * 0.5f;
+                float arm = size * 0.28f, thick = std::max(1.0f, size * 0.12f);
+                ImU32 sign = over ? c.port_text : c.text;
+                dl->AddLine(ImVec2(mid_x - arm, mid_y), ImVec2(mid_x + arm, mid_y), sign, thick);
+                dl->AddLine(ImVec2(mid_x, mid_y - arm), ImVec2(mid_x, mid_y + arm), sign, thick);
+            }
+        }
+
         // Pin markers, colored like the wire they connect to; the clock ">"
         // inside the box; and for label nets a stub with the net's name.
         std::span<const DisplayPin> pins = g.pins_of(node);
@@ -639,7 +684,8 @@ void Schematic::draw(ImDrawList* dl, const Camera2D& camera, ImVec2 origin, cons
                 const std::string& label = names.str(pin.name);
                 float w = font->CalcTextSizeA(pin_px, FLT_MAX, 0.0f, label.c_str()).x;
                 float x = pin.side == PinSide::Left ? p.x + inset : p.x - inset - w;
-                dl->AddText(font, pin_px, ImVec2(x, y), c.dim, label.c_str(), nullptr, 0.0f, &box_clip);
+                dl->AddText(font, pin_px, ImVec2(x, y), c.dim, label.c_str(), nullptr, 0.0f,
+                            &box_clip);
             }
             if (!pin.constant.empty()) { // constant inputs: value outside the box
                 float w = font->CalcTextSizeA(pin_px, FLT_MAX, 0.0f, pin.constant.c_str()).x;
